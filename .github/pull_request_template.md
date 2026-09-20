@@ -16,7 +16,7 @@
 ## Comprobaciones
 
 - [ ] Probado en local
-- [ ] Si aplica a los dos entornos, el cambio está en `prod/` y en `pre/`
+- [ ] Probado en el entorno `pre` del VPS
 - [ ] No se sube ningún `.env` ni credenciales
 - [ ] Si hay variables de entorno nuevas, están en `.env.example`
 - [ ] Si hay cambios de base de datos, están documentados en el PR

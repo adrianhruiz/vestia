@@ -1,9 +1,0 @@
-.env
-/storage/*.sqlite*
-/storage/outfits/*
-!/storage/outfits/.gitkeep
-/storage/logs/*
-!/storage/logs/.gitkeep
-/public/uploads/*
-!/public/uploads/.gitkeep
-
