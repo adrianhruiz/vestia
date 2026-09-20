@@ -1,10 +1,19 @@
-# Environment files (contain real credentials)
+# Environment file with real credentials. Never commit it.
 .env
-**/.env
+.env.*
+!.env.example
 
-# Runtime data
-**/storage/logs/*
-**/storage/outfits/*
-**/storage/*.sqlite*
-**/public/uploads/*
-!**/.gitkeep
+# Runtime data: user uploads, generated outfits and logs
+/public/uploads/*
+!/public/uploads/.gitkeep
+/storage/outfits/*
+!/storage/outfits/.gitkeep
+/storage/logs/*
+!/storage/logs/.gitkeep
+/storage/*.sqlite*
+
+# Editor and OS noise
+.DS_Store
+.idea/
+.vscode/
+*.swp
