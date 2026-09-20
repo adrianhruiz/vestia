@@ -135,7 +135,89 @@ systemctl restart armario-prod-worker
 El `.env` de cada entorno no se toca en ningún despliegue: está fuera de git, así que
 `git checkout` y `git pull` no lo pisan.
 
-## Flujo de trabajo
+## Cómo colaborar
 
-El modelo de ramas, los nombres, el ciclo de un pull request y las urgencias en producción
-están en [CONTRIBUTING.md](CONTRIBUTING.md).
+El repositorio es privado y trabajamos dos personas. Todo el código entra por **pull
+request**: nadie hace `push` directo a `main` ni a `develop`.
+
+### Ramas
+
+| Rama      | Qué contiene                          | Cómo se actualiza              |
+|-----------|---------------------------------------|--------------------------------|
+| `main`    | Lo que está publicado en `prod`       | PR desde `develop`             |
+| `develop` | Lo siguiente que se publicará         | PR desde una rama de trabajo   |
+
+`develop` es la rama por defecto, así que los PR nuevos ya apuntan ahí.
+
+Las ramas de trabajo salen siempre de `develop` y llevan prefijo según el tipo:
+`feature/`, `fix/`, `refactor/`, `chore/` y `hotfix/` (esta última sale de `main`).
+
+### Preparar tu copia (una sola vez)
+
+```bash
+git clone https://github.com/adrianhruiz/vestia.git
+cd vestia
+git config core.hooksPath .githooks    # rechaza el push directo a main y develop
+git config commit.template .gitmessage
+cp .env.example .env                   # y rellénalo (ver "Credenciales")
+```
+
+### Ciclo completo de una funcionalidad
+
+```bash
+# 1. Partir de develop actualizada
+git checkout develop && git pull
+
+# 2. Crear la rama de trabajo
+git checkout -b feature/filtro-por-temporada
+
+# 3. Trabajar, commitear (mensajes en inglés e imperativo) y subir
+git add -A
+git commit -m "Add season filter to wardrobe listing"
+git push -u origin feature/filtro-por-temporada
+
+# 4. Desplegar esa rama en el entorno pre del VPS y comprobar que va bien
+#    (ver "Cómo se prueba una funcionalidad")
+
+# 5. Abrir el pull request contra develop
+gh pr create --base develop --fill
+```
+
+A partir de ahí lo revisa la otra persona: comenta, pide cambios si hace falta y aprueba.
+Cuando está aprobado se mergea y la rama se borra sola.
+
+### Revisar un pull request
+
+Desde la web, en la pestaña **Pull requests** del repositorio, o desde la terminal:
+
+```bash
+gh pr list                  # ver los PR abiertos
+gh pr checkout <numero>     # traerte la rama para probarla
+gh pr diff <numero>         # ver el diff
+gh pr review <numero> --approve                        # aprobar
+gh pr review <numero> --request-changes -b "motivo"    # pedir cambios
+gh pr merge <numero> --squash --delete-branch          # mergear
+```
+
+Un PR se puede mergear cuando tiene la aprobación de la otra persona y no quedan
+conversaciones abiertas.
+
+### Publicar a producción
+
+Cuando `develop` acumula lo que queremos publicar:
+
+```bash
+gh pr create --base main --head develop --title "Release: <resumen>"
+```
+
+Se revisa, se mergea y se despliega en `prod` como se indica más abajo.
+
+### Reglas
+
+- Código, comentarios y mensajes de commit **en inglés**. La documentación, en español.
+- **Nunca** subas un `.env` ni credenciales. Si añades una variable, refléjala en
+  `.env.example`.
+- Prueba en `pre` antes de abrir el PR.
+
+El detalle completo del flujo, incluidos los hotfixes, está en
+[CONTRIBUTING.md](CONTRIBUTING.md).
