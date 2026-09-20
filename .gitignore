@@ -1,0 +1,10 @@
+# Environment files (contain real credentials)
+.env
+**/.env
+
+# Runtime data
+**/storage/logs/*
+**/storage/outfits/*
+**/storage/*.sqlite*
+**/public/uploads/*
+!**/.gitkeep
