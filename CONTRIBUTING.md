@@ -52,14 +52,15 @@ git commit -m "Add season filter to wardrobe listing"
 # 4. Subir la rama
 git push -u origin feature/filtro-por-temporada
 
-# 5. Probar la rama en el entorno pre del VPS (ver README.md)
+# 5. Probar la rama en tu slot del VPS (ver README.md)
 #    y solo despues abrir el PR contra develop
 gh pr create --base develop --fill
 ```
 
-Una funcionalidad se prueba **en el entorno `pre` del VPS**, desplegando ahí la rama de
-trabajo — nunca contra el código de `main`. Los pasos exactos están en el
-[README](README.md#cómo-se-prueba-una-funcionalidad).
+Una funcionalidad se prueba **en tu slot personal del VPS**, desplegando ahí la rama de
+trabajo — nunca en `pre` ni contra el código de `main`. Cada persona tiene el suyo, con su
+base de datos y su worker, así que podéis probar ramas distintas a la vez. Los pasos están
+en el [README](README.md#probar-una-feature).
 
 A partir de ahí: la otra persona revisa, se comentan los cambios si hace falta, y cuando
 está aprobado se mergea. La rama se borra sola al mergear.
@@ -99,9 +100,9 @@ gh pr create --base develop --head main --title "Sincronizar hotfix en develop"
 - Los `.env` **nunca** se suben: están en `.gitignore` y contienen la API key de OpenAI
   y las contraseñas de base de datos reales. Si añades una variable nueva, refléjala en
   `.env.example` con un valor de ejemplo.
-- El repositorio tiene **un solo código**. Los entornos `pre` y `prod` del VPS son dos
-  despliegues de ese mismo código, y se diferencian únicamente por su `.env` y su base
-  de datos.
+- El repositorio tiene **un solo código**. Los entornos del VPS (tu slot, `pre` y `prod`)
+  son despliegues de ese mismo código, y se diferencian únicamente por su `.env` y su
+  base de datos.
 
 ## Revisión
 

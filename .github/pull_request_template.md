@@ -16,7 +16,7 @@
 ## Comprobaciones
 
 - [ ] Probado en local
-- [ ] Probado en el entorno `pre` del VPS
+- [ ] Probado en mi slot del VPS
 - [ ] No se sube ningún `.env` ni credenciales
 - [ ] Si hay variables de entorno nuevas, están en `.env.example`
 - [ ] Si hay cambios de base de datos, están documentados en el PR
