@@ -92,12 +92,24 @@ La aplicación queda en http://localhost:8000.
 El resultado final se ve siempre en el VPS, que tiene dos entornos independientes con su
 propia base de datos, su propio `.env` y su propio worker:
 
-| Entorno | URL | Ruta en el VPS | Base de datos | Worker (systemd) |
-|---------|-----|----------------|---------------|------------------|
-| **pre** — pruebas | https://pre.armario.89.116.30.213.sslip.io | `/home/saymon/php-projects/armario/pre` | `vestia_pre` | `armario-pre-worker` |
-| **prod** — producción | https://armario.89.116.30.213.sslip.io | `/home/saymon/php-projects/armario/prod` | `vestia_prod` | `armario-prod-worker` |
+| Entorno | URL | Ruta en el VPS | Rama | Base de datos | Worker (systemd) |
+|---------|-----|----------------|------|---------------|------------------|
+| **pre** — pruebas | https://pre.armario.89.116.30.213.sslip.io | `/home/saymon/php-projects/armario/pre` | `develop` | `vestia_pre` | `armario-pre-worker` |
+| **prod** — producción | https://armario.89.116.30.213.sslip.io | `/home/saymon/php-projects/armario/prod` | `main` | `vestia_prod` | `armario-prod-worker` |
 
 `pre` es donde se prueba. `prod` solo refleja lo que hay en `main`.
+
+Los dos directorios son **clones de este repositorio**, así que desplegar es hacer
+`git pull` o `git checkout` de la rama que toque. Detalles del montaje:
+
+- El VPS accede al repositorio con una **deploy key de solo lectura** (`vestia-vps-deploy`),
+  no con una cuenta personal. Puede leer el código, no escribir en el repositorio.
+- El `.env` de cada entorno está fuera de git, así que ningún despliegue lo pisa.
+- `storage/` y `public/uploads/` pertenecen a `www-data` para que Apache y el worker puedan
+  escribir. Los clones tienen `core.fileMode false`, de forma que esos permisos no aparecen
+  como cambios pendientes.
+- Apache sirve desde `public/`, así que `.env` y `.git` quedan fuera de la raíz web y no son
+  accesibles por HTTP.
 
 ## Cómo se prueba una funcionalidad
 
