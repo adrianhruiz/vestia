@@ -72,14 +72,25 @@ if (str_starts_with($path, '/api/')) {
         $input=array_merge($profile?:[],request_json()); $stmt=$pdo->prepare("INSERT INTO jobs(user_id,type,status,input_json,created_at) VALUES(?,'wardrobe_analysis','queued',?,?)"); $stmt->execute([$uid,json_encode($input,JSON_UNESCAPED_UNICODE),date(DATE_ATOM)]);
         json_response(['job_id'=>(int)$pdo->lastInsertId()],202);
     }
+    if (preg_match('#^/api/jobs/(\d+)/cancel$#',$path,$m) && $_SERVER['REQUEST_METHOD']==='POST') {
+        require_csrf(); $id=(int)$m[1];
+        $stmt=$pdo->prepare('SELECT status FROM jobs WHERE id=? AND user_id=?'); $stmt->execute([$id,$uid]); $status=$stmt->fetchColumn();
+        if ($status===false) json_response(['error'=>'Análisis no encontrado.'],404);
+        if (!in_array($status,['queued','processing'],true)) json_response(['error'=>'Ese análisis ya ha terminado.'],409);
+        // A queued job has spent nothing, so it stops right here. A running one has already
+        // paid for at least the text call: flag it and let the worker stop at its next step.
+        if ($status==='queued') $pdo->prepare("UPDATE jobs SET status='cancelled', cancel_requested=1, phase=NULL, finished_at=? WHERE id=? AND status='queued'")->execute([date(DATE_ATOM),$id]);
+        else $pdo->prepare('UPDATE jobs SET cancel_requested=1 WHERE id=?')->execute([$id]);
+        json_response(['ok'=>true,'stopped'=>$status==='queued']);
+    }
     if (preg_match('#^/api/jobs/(\d+)$#',$path,$m) && $_SERVER['REQUEST_METHOD']==='GET') {
-        $stmt=$pdo->prepare('SELECT id,status,progress,result_json,error,created_at,finished_at FROM jobs WHERE id=? AND user_id=?'); $stmt->execute([(int)$m[1],$uid]); $job=$stmt->fetch(); if(!$job) json_response(['error'=>'Análisis no encontrado.'],404);
+        $stmt=$pdo->prepare('SELECT id,status,progress,phase,result_json,error,created_at,finished_at FROM jobs WHERE id=? AND user_id=?'); $stmt->execute([(int)$m[1],$uid]); $job=$stmt->fetch(); if(!$job) json_response(['error'=>'Análisis no encontrado.'],404);
         $job['result']=$job['result_json']?json_decode($job['result_json'],true):null; unset($job['result_json']); json_response(['job'=>$job]);
     }
     if ($path === '/api/jobs' && $_SERVER['REQUEST_METHOD'] === 'GET') {
         // The list is metadata only. It used to carry result_json for all ten analyses when
         // the only one ever rendered is the newest completed, so that one travels apart.
-        $stmt=$pdo->prepare('SELECT id,status,progress,error,created_at,finished_at FROM jobs WHERE user_id=? ORDER BY id DESC LIMIT 10'); $stmt->execute([$uid]); $jobs=$stmt->fetchAll();
+        $stmt=$pdo->prepare('SELECT id,status,progress,phase,error,created_at,finished_at FROM jobs WHERE user_id=? ORDER BY id DESC LIMIT 10'); $stmt->execute([$uid]); $jobs=$stmt->fetchAll();
         $latest=null; foreach($jobs as $j) if($j['status']==='completed'){$latest=(int)$j['id']; break;}
         $result=null;
         if($latest){ $stmt=$pdo->prepare('SELECT result_json FROM jobs WHERE id=? AND user_id=?'); $stmt->execute([$latest,$uid]); $raw=$stmt->fetchColumn(); $result=$raw?json_decode($raw,true):null; }
