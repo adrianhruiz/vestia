@@ -9,8 +9,12 @@ if (str_starts_with($path, '/api/')) {
         require_csrf(); $d = request_json();
         $name = trim((string)($d['name'] ?? '')); $email = strtolower(trim((string)($d['email'] ?? ''))); $password = (string)($d['password'] ?? '');
         if (mb_strlen($name) < 2 || !filter_var($email, FILTER_VALIDATE_EMAIL) || strlen($password) < 10) json_response(['error' => 'Revisa nombre, email y contraseña (mínimo 10 caracteres).'], 422);
-        try { $stmt = $pdo->prepare('INSERT INTO users(name,email,password_hash,created_at) VALUES(?,?,?,?)'); $stmt->execute([$name,$email,password_hash($password,PASSWORD_DEFAULT),date(DATE_ATOM)]); }
-        catch (PDOException) { json_response(['error' => 'Ese email ya está registrado.'], 409); }
+        try { $stmt = $pdo->prepare('INSERT INTO users(name,email,password_hash,style_profile,created_at) VALUES(?,?,?,?,?)'); $stmt->execute([$name,$email,password_hash($password,PASSWORD_DEFAULT),'{}',date(DATE_ATOM)]); }
+        catch (PDOException $e) {
+            if (($e->errorInfo[1] ?? 0) === 1062) json_response(['error' => 'Ese email ya está registrado.'], 409);
+            error_log('register failed: ' . $e->getMessage());
+            json_response(['error' => 'No se pudo completar el registro. Inténtalo de nuevo.'], 500);
+        }
         session_regenerate_id(true); $_SESSION['user_id'] = (int)$pdo->lastInsertId(); json_response(['ok' => true]);
     }
     if ($path === '/api/login' && $_SERVER['REQUEST_METHOD'] === 'POST') {
