@@ -15,6 +15,14 @@ Options -Indexes
 </IfModule>
 
 RewriteEngine On
+
+# A missing asset has to 404. Without this it falls through to the app, which answers with
+# the landing page under a 200 — which is exactly what Lighthouse was reading when it called
+# /robots.txt invalid before the file existed.
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^(assets|uploads)/ - [L,R=404]
+
 RewriteCond %{REQUEST_FILENAME} !-f
 RewriteCond %{REQUEST_FILENAME} !-d
 RewriteRule ^ index.php [L,QSA]
