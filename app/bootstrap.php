@@ -103,6 +103,16 @@ function asset(string $path): string {
     return $versions[$path] === null ? $path : $path . '?v=' . $versions[$path];
 }
 
+/**
+ * srcset for a family of pre-rendered widths, e.g.
+ * srcset('/assets/hero/wardrobe-hero-%d.avif', [480, 768]).
+ */
+function srcset(string $template, array $widths): string {
+    $candidates = [];
+    foreach ($widths as $width) $candidates[] = asset(sprintf($template, $width)) . ' ' . $width . 'w';
+    return implode(', ', $candidates);
+}
+
 function json_response(array $data, int $status = 200): never {
     http_response_code($status); header('Content-Type: application/json; charset=utf-8');
     echo json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES); exit;
