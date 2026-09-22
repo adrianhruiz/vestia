@@ -59,6 +59,10 @@ git fetch origin && git checkout <tu-rama> && git pull
 systemctl restart armario-slot@<tu-nombre>
 ```
 
+El despliegue no es automático: tu slot no se entera de un `git push` por sí solo, así que
+repite este checkout+pull+restart cada vez que quieras probar una rama nueva o los últimos
+commits de la misma rama.
+
 Y revisa el resultado en la URL de tu slot. Si algo falla:
 
 ```bash
