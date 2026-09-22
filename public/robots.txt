@@ -1,0 +1,5 @@
+# The app itself is a single public page; everything behind it needs a session.
+User-agent: *
+Disallow: /api/
+Disallow: /uploads/
+Disallow: /outfit-image.php
