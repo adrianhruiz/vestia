@@ -76,7 +76,15 @@ if (str_starts_with($path, '/api/')) {
         $stmt=$pdo->prepare('SELECT id,status,progress,result_json,error,created_at,finished_at FROM jobs WHERE id=? AND user_id=?'); $stmt->execute([(int)$m[1],$uid]); $job=$stmt->fetch(); if(!$job) json_response(['error'=>'Análisis no encontrado.'],404);
         $job['result']=$job['result_json']?json_decode($job['result_json'],true):null; unset($job['result_json']); json_response(['job'=>$job]);
     }
-    if ($path === '/api/jobs' && $_SERVER['REQUEST_METHOD'] === 'GET') { $stmt=$pdo->prepare('SELECT id,status,progress,result_json,error,created_at,finished_at FROM jobs WHERE user_id=? ORDER BY id DESC LIMIT 10'); $stmt->execute([$uid]); $jobs=$stmt->fetchAll(); foreach($jobs as &$j){$j['result']=$j['result_json']?json_decode($j['result_json'],true):null;unset($j['result_json']);} json_response(['jobs'=>$jobs]); }
+    if ($path === '/api/jobs' && $_SERVER['REQUEST_METHOD'] === 'GET') {
+        // The list is metadata only. It used to carry result_json for all ten analyses when
+        // the only one ever rendered is the newest completed, so that one travels apart.
+        $stmt=$pdo->prepare('SELECT id,status,progress,error,created_at,finished_at FROM jobs WHERE user_id=? ORDER BY id DESC LIMIT 10'); $stmt->execute([$uid]); $jobs=$stmt->fetchAll();
+        $latest=null; foreach($jobs as $j) if($j['status']==='completed'){$latest=(int)$j['id']; break;}
+        $result=null;
+        if($latest){ $stmt=$pdo->prepare('SELECT result_json FROM jobs WHERE id=? AND user_id=?'); $stmt->execute([$latest,$uid]); $raw=$stmt->fetchColumn(); $result=$raw?json_decode($raw,true):null; }
+        json_response(['jobs'=>$jobs,'result_job_id'=>$latest,'result'=>$result]);
+    }
     json_response(['error'=>'Ruta no encontrada.'],404);
 }
 
