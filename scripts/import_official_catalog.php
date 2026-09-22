@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 require dirname(__DIR__) . '/app/bootstrap.php';
+require dirname(__DIR__) . '/app/Images.php';
 
 $email = $argv[1] ?? 'demo@vestia.es';
 $catalogFile = dirname(__DIR__) . '/storage/official_catalog.json';
@@ -25,9 +26,11 @@ $pdo->beginTransaction();
 try {
     $pdo->prepare('DELETE FROM jobs WHERE user_id=?')->execute([$userId]);
     $pdo->prepare('DELETE FROM garments WHERE user_id=?')->execute([$userId]);
-    $insert = $pdo->prepare('INSERT INTO garments(user_id,name,brand,reference,category,color,size,season,notes,image_path,favorite,wear_count,created_at,source_url,price_note) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)');
+    $insert = $pdo->prepare('INSERT INTO garments(user_id,name,brand,reference,category,color,size,season,notes,image_path,thumb_path,favorite,wear_count,created_at,source_url,price_note) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)');
     foreach ($catalog as $index => $item) {
-        $insert->execute([$userId,$item['name'],$item['brand'],$item['reference'],$item['category'],$item['color'],$item['size'],$item['season'],$item['notes'],$item['image_path'],$index < 8 ? 1 : 0,$index % 9,date(DATE_ATOM),$item['source_url'],$item['price_note']]);
+        // The catalog JSON still names the source JPGs; the app serves the WebP pair.
+        $image = preg_replace('/\.jpe?g$/i', '.webp', (string) $item['image_path']);
+        $insert->execute([$userId,$item['name'],$item['brand'],$item['reference'],$item['category'],$item['color'],$item['size'],$item['season'],$item['notes'],$image,thumb_path_for($image),$index < 8 ? 1 : 0,$index % 9,date(DATE_ATOM),$item['source_url'],$item['price_note']]);
     }
     $pdo->commit();
 } catch (Throwable $error) {
