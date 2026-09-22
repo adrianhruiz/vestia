@@ -17,3 +17,6 @@
 .idea/
 .vscode/
 *.swp
+
+# Lighthouse/Unlighthouse scan output
+.unlighthouse/
