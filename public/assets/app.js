@@ -26,7 +26,7 @@ if(document.body.dataset.auth==='1'){
  Array.isArray(window.APP.garments)?renderGarments(window.APP.garments):loadGarments();
  $('#profile-form').addEventListener('submit',async e=>{e.preventDefault();await api('/api/profile',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.fromEntries(new FormData(e.currentTarget)))});toast('Preferencias guardadas')});
  const startAnalysis=async()=>{try{const d=await api('/api/analyze',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});activeJob=d.job_id;showMini(3);switchView('outfits');startPolling()}catch(x){toast(x.message)}};$('#analyze').onclick=startAnalysis;$('#analyze-top').onclick=startAnalysis;
- function showMini(p){$('#job-mini').hidden=false;$('.progress i',$('#job-mini')).style.width=p+'%'}
+ function showMini(p,phase){$('#job-mini').hidden=false;$('.progress i',$('#job-mini')).style.width=p+'%';if(phase)$('#job-mini small').textContent=phase}
  // One chain at a time. Every entry point used to call pollJob() directly, and pollJob
  // re-armed itself without clearing the previous timer, so opening Outfits twice left two
  // independent loops hitting the API every 2.5s for as long as the analysis ran.
@@ -36,8 +36,8 @@ if(document.body.dataset.auth==='1'){
   if(!activeJob){stopPolling();return}
   if(document.hidden){stopPolling();return}
   if(Date.now()-pollStartedAt>POLL_GIVE_UP){stopPolling();toast('El análisis sigue en marcha. Recarga la página para ver cómo va.');return}
-  try{const {job}=await api('/api/jobs/'+activeJob);showMini(job.progress);renderRunning(job);
-   if(job.status==='completed'||job.status==='failed'){activeJob=null;stopPolling();$('#job-mini').hidden=true;loadJobs();return}
+  try{const {job}=await api('/api/jobs/'+activeJob);showMini(job.progress,job.phase);renderRunning(job);
+   if(!['queued','processing'].includes(job.status)){activeJob=null;stopPolling();$('#job-mini').hidden=true;loadJobs();return}
   }catch(e){toast(e.message)}
   if(!polling)return;
   clearTimeout(pollTimer);pollTimer=setTimeout(pollJob,pollDelay);
@@ -45,8 +45,19 @@ if(document.body.dataset.auth==='1'){
  }
  // A backgrounded tab stops polling entirely and picks up where it left off on return.
  document.addEventListener('visibilitychange',()=>{if(!document.hidden&&activeJob)startPolling()});
- function renderRunning(j){$('#jobs').innerHTML=`<div class="job-running"><b>${j.status==='failed'?'No se pudo completar':'Tu estilista está trabajando'}</b><p>${j.error?esc(j.error):'Puedes seguir usando la web; el análisis continúa en segundo plano.'}</p><div class="progress"><i style="width:${j.progress}%"></i></div><small>${j.progress}% completado</small></div>`}
- async function loadJobs(){const {jobs,result}=await api('/api/jobs');const running=jobs.find(j=>['queued','processing'].includes(j.status));if(running){activeJob=running.id;renderRunning(running);startPolling();return}if(result){renderResult(result);return}const failed=jobs.find(j=>j.status==='failed');$('#jobs').innerHTML=failed?`<div class="job-running"><b>Último análisis fallido</b><p>${esc(failed.error)}</p></div>`:'<div class="empty"><b>Aún no hay looks</b><p>Analiza tu armario para crear tus primeras combinaciones.</p></div>'}
+ const JOB_TITLES={failed:'No se pudo completar',cancelled:'Análisis cancelado'};
+ function renderRunning(j){
+  const running=['queued','processing'].includes(j.status);
+  $('#jobs').innerHTML=`<div class="job-running"><b>${JOB_TITLES[j.status]||'Tu estilista está trabajando'}</b><p>${esc(j.error||j.phase||'Puedes seguir usando la web; el análisis continúa en segundo plano.')}</p><div class="progress"><i style="width:${j.progress}%"></i></div><small>${j.progress}% completado</small>${running?'<button class="btn btn-soft" id="cancel-job">Cancelar análisis</button>':''}</div>`;
+  const cancel=$('#cancel-job');
+  if(cancel)cancel.onclick=async()=>{
+   if(!confirm('¿Cancelar el análisis? Lo que ya haya pedido a la IA no se recupera.'))return;
+   cancel.disabled=true;
+   try{await api(`/api/jobs/${j.id}/cancel`,{method:'POST'});activeJob=null;stopPolling();$('#job-mini').hidden=true;toast('Análisis cancelado');loadJobs()}
+   catch(x){cancel.disabled=false;toast(x.message)}
+  }
+ }
+ async function loadJobs(){const {jobs,result}=await api('/api/jobs');const running=jobs.find(j=>['queued','processing'].includes(j.status));if(running){activeJob=running.id;renderRunning(running);startPolling();return}if(result){renderResult(result);return}const last=jobs[0];$('#jobs').innerHTML=last&&last.status==='failed'?`<div class="job-running"><b>Último análisis fallido</b><p>${esc(last.error)}</p></div>`:last&&last.status==='cancelled'?'<div class="job-running"><b>Análisis cancelado</b><p>Puedes lanzar uno nuevo cuando quieras.</p></div>':'<div class="empty"><b>Aún no hay looks</b><p>Analiza tu armario para crear tus primeras combinaciones.</p></div>'}
  function outfitVisual(o){if(o.image_url)return `<img src="${safeAssetUrl(o.image_url)}" alt="Visualización de ${esc(o.name)}" loading="lazy">`;const pieces=(o.garment_ids||[]).map(id=>garmentCache.find(g=>Number(g.id)===Number(id))).filter(g=>thumbOf(g)).slice(0,4);return pieces.length?`<div class="outfit-collage">${pieces.map(g=>`<img src="${safeAssetUrl(thumbOf(g))}" alt="${esc(g.name)}" loading="lazy" decoding="async">`).join('')}</div>`:'<div class="garment-image outfit-placeholder">✦</div>'}
  function renderResult(r){$('#jobs').innerHTML=`<section class="analysis-summary"><h2>La lectura de tu armario</h2><p>${esc(r.summary)}</p><div class="chips">${(r.palette||[]).map(x=>`<span class="chip">${esc(x)}</span>`).join('')}</div></section><div class="outfit-grid">${(r.outfits||[]).map(o=>`<article class="outfit">${outfitVisual(o)}<div class="outfit-body"><span class="occasion">${esc(o.occasion)}</span><h3>${esc(o.name)}</h3><p>${esc(o.reason)}</p>${o.missing_items?.length?`<p><b>Para completar:</b> ${esc(o.missing_items.join(', '))}</p>`:''}${o.shopping?.length?`<div class="shopping"><small>COMPRAR EN INDITEX</small>${o.shopping.map(s=>`<a href="${safeUrl(s.url)}" target="_blank" rel="noopener noreferrer sponsored"><span>${esc(s.brand)} · ${esc(s.name)}</span><b>↗</b></a>`).join('')}</div>`:''}</div></article>`).join('')}</div>`}
  loadJobs();
