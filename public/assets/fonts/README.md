@@ -30,3 +30,15 @@ curl -sA 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko)
 
 Los nombres de fichero de Google llevan un hash y cambian con cada versión de la fuente,
 por eso aquí se guardan con nombres estables.
+
+## Los .woff2 no llevan `?v=`
+
+A diferencia del resto de assets, las fuentes se referencian por su ruta pelada, tanto en
+el `@font-face` de `app.css` como en el `<link rel="preload">` del `<head>`. Tiene que ser
+**la misma URL en los dos sitios**: si no coinciden, el navegador descarga cada fuente dos
+veces y el preload calienta una URL que nadie pide.
+
+Como el `@font-face` vive en un CSS estático, no hay forma de meterle el token de `asset()`
+sin un paso de build. La contrapartida es que, con la caché de un año de `.htaccess`,
+**sustituir una fuente obliga a cambiarle el nombre al fichero** (por ejemplo añadiendo la
+versión: `dm-sans-latin.v18.woff2`) y a actualizar las dos referencias.
