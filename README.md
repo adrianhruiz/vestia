@@ -19,7 +19,14 @@ php -S localhost:8000 -t public          # aplicación en http://localhost:8000
 php scripts/worker.php                   # en otra terminal
 ```
 
-El esquema (`users`, `garments`, `jobs`) se crea solo en el primer arranque.
+El esquema vive en `database/migrations/*.sql` y se aplica solo: al abrir la conexión, la
+aplicación ejecuta las migraciones que falten y las anota en la tabla `schema_migrations`.
+Así todas las bases de datos —la tuya, la de tu slot, `pre` y `prod`— acaban con el mismo
+esquema, se hayan creado cuando se hayan creado. Para aplicarlas y ver el estado a mano:
+
+```bash
+php scripts/migrate.php
+```
 
 ## Credenciales
 
@@ -72,11 +79,14 @@ Cuando va bien, abre el pull request a `develop`.
 
 ```bash
 # pre (tras mergear a develop)
-cd /home/saymon/php-projects/armario/pre && git pull && systemctl restart armario-pre-worker
+cd /home/saymon/php-projects/armario/pre && git pull && php scripts/migrate.php && systemctl restart armario-pre-worker
 
 # prod (tras mergear a main)
-cd /home/saymon/php-projects/armario/prod && git pull && systemctl restart armario-prod-worker
+cd /home/saymon/php-projects/armario/prod && git pull && php scripts/migrate.php && systemctl restart armario-prod-worker
 ```
+
+`scripts/migrate.php` no es obligatorio —la primera petición aplicaría las migraciones
+igual—, pero así el despliegue falla en tu terminal y no en la cara del primer usuario.
 
 El `.env` está fuera de git, así que ningún despliegue lo pisa.
 
@@ -100,8 +110,9 @@ El flujo completo —revisión, publicación a producción, hotfixes y convencio
 ## Estructura
 
 ```
-app/       bootstrap.php (env, sesión, PDO, migración) · OpenAI.php (análisis e imágenes)
+app/       bootstrap.php (env, sesión, PDO, migraciones) · OpenAI.php (análisis e imágenes)
+database/  migrations/*.sql (esquema versionado, se aplica solo)
 public/    index.php (front controller) · outfit-image.php · assets/ · uploads/
-scripts/   worker.php (cola de jobs) · seed_*.php · import_official_catalog.php
+scripts/   worker.php (cola de jobs) · migrate.php · seed_*.php · import_official_catalog.php
 storage/   official_catalog.json · outfits/ · logs/
 ```

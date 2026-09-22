@@ -93,6 +93,28 @@ Tras mergear en `main`, hay que traer el arreglo de vuelta a `develop` para no p
 gh pr create --base develop --head main --title "Sincronizar hotfix en develop"
 ```
 
+## Cambios de esquema
+
+El esquema no se toca a mano en ninguna base de datos. Cada cambio es un fichero nuevo en
+`database/migrations/`, numerado y en inglés:
+
+```
+database/migrations/003_garments_add_material.sql
+```
+
+Reglas:
+
+- **Nunca edites una migración ya mergeada.** Ya está aplicada en el slot de otra persona,
+  en `pre` o en `prod`, y editarla no la vuelve a ejecutar: crearía justo la divergencia
+  que las migraciones evitan. Para corregir algo, añade otra migración.
+- **SQL idempotente** (`IF NOT EXISTS`, `IF EXISTS`): si una migración falla a mitad, el
+  reintento tiene que poder repetir lo que ya hizo.
+- Una migración se prueba en tu slot antes del PR, como cualquier otro cambio.
+
+Las migraciones pendientes se aplican solas al abrir la conexión —web, worker o script—, y
+quedan anotadas en `schema_migrations`. `php scripts/migrate.php` hace lo mismo a mano y
+muestra el estado de la base de datos del entorno en el que lo ejecutas.
+
 ## Convenciones
 
 - **Código y comentarios en inglés.** Los mensajes de commit también.
