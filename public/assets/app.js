@@ -9,6 +9,11 @@ $('#auth-form')?.addEventListener('submit',async e=>{e.preventDefault();const f=
 $('#logout')?.addEventListener('click',async()=>{await api('/api/logout',{method:'POST'});location.reload()});
 if(document.body.dataset.auth==='1'){
  let activeJob=null,pollTimer=null,polling=false,garmentCache=[];
+ // An analysis takes one to three minutes. Polling it at a flat 2.5s meant ~50 requests
+ // per run, so back off towards 10s, stop while the tab is in the background, and give up
+ // rather than poll a job that is never going to answer.
+ const POLL_MIN=2000,POLL_MAX=10000,POLL_GROWTH=1.4,POLL_GIVE_UP=10*60*1000;
+ let pollDelay=POLL_MIN,pollStartedAt=0;
  const switchView=view=>{$$('.view').forEach(v=>v.classList.toggle('active',v.id==='view-'+view));$$('[data-view]').forEach(b=>b.classList.toggle('active',b.dataset.view===view));if(view==='outfits')loadJobs()};$$('[data-view]').forEach(b=>b.onclick=()=>switchView(b.dataset.view));
  $('#add-garment').onclick=()=>openModal('#garment-modal');$('#scan-label').onclick=()=>{$('#garment-modal').hidden=false;$('input[name=image]',$('#garment-form')).click();toast('Fotografía la etiqueta y escribe la referencia visible')};
  const imageInput=$('input[name=image]',$('#garment-form')),preview=$('.upload-preview',$('#garment-form'));let previewUrl='';
@@ -25,16 +30,21 @@ if(document.body.dataset.auth==='1'){
  // One chain at a time. Every entry point used to call pollJob() directly, and pollJob
  // re-armed itself without clearing the previous timer, so opening Outfits twice left two
  // independent loops hitting the API every 2.5s for as long as the analysis ran.
- function startPolling(){if(polling)return;polling=true;pollJob()}
+ function startPolling(){if(polling)return;polling=true;pollDelay=POLL_MIN;pollStartedAt=Date.now();pollJob()}
  function stopPolling(){polling=false;clearTimeout(pollTimer);pollTimer=null}
  async function pollJob(){
   if(!activeJob){stopPolling();return}
+  if(document.hidden){stopPolling();return}
+  if(Date.now()-pollStartedAt>POLL_GIVE_UP){stopPolling();toast('El análisis sigue en marcha. Recarga la página para ver cómo va.');return}
   try{const {job}=await api('/api/jobs/'+activeJob);showMini(job.progress);renderRunning(job);
    if(job.status==='completed'||job.status==='failed'){activeJob=null;stopPolling();$('#job-mini').hidden=true;loadJobs();return}
   }catch(e){toast(e.message)}
   if(!polling)return;
-  clearTimeout(pollTimer);pollTimer=setTimeout(pollJob,2500)
+  clearTimeout(pollTimer);pollTimer=setTimeout(pollJob,pollDelay);
+  pollDelay=Math.min(Math.round(pollDelay*POLL_GROWTH),POLL_MAX)
  }
+ // A backgrounded tab stops polling entirely and picks up where it left off on return.
+ document.addEventListener('visibilitychange',()=>{if(!document.hidden&&activeJob)startPolling()});
  function renderRunning(j){$('#jobs').innerHTML=`<div class="job-running"><b>${j.status==='failed'?'No se pudo completar':'Tu estilista está trabajando'}</b><p>${j.error?esc(j.error):'Puedes seguir usando la web; el análisis continúa en segundo plano.'}</p><div class="progress"><i style="width:${j.progress}%"></i></div><small>${j.progress}% completado</small></div>`}
  async function loadJobs(){const {jobs}=await api('/api/jobs');const running=jobs.find(j=>['queued','processing'].includes(j.status));if(running){activeJob=running.id;renderRunning(running);startPolling();return}const done=jobs.find(j=>j.status==='completed'&&j.result);if(!done){const failed=jobs.find(j=>j.status==='failed');$('#jobs').innerHTML=failed?`<div class="job-running"><b>Último análisis fallido</b><p>${esc(failed.error)}</p></div>`:'<div class="empty"><b>Aún no hay looks</b><p>Analiza tu armario para crear tus primeras combinaciones.</p></div>';return}renderResult(done.result)}
  function outfitVisual(o){if(o.image_url)return `<img src="${safeAssetUrl(o.image_url)}" alt="Visualización de ${esc(o.name)}" loading="lazy">`;const pieces=(o.garment_ids||[]).map(id=>garmentCache.find(g=>Number(g.id)===Number(id))).filter(g=>thumbOf(g)).slice(0,4);return pieces.length?`<div class="outfit-collage">${pieces.map(g=>`<img src="${safeAssetUrl(thumbOf(g))}" alt="${esc(g.name)}" loading="lazy" decoding="async">`).join('')}</div>`:'<div class="garment-image outfit-placeholder">✦</div>'}
