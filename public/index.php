@@ -1,6 +1,7 @@
 <?php
 declare(strict_types=1);
 require dirname(__DIR__) . '/app/bootstrap.php';
+require dirname(__DIR__) . '/app/Images.php';
 
 $path = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/';
 if (str_starts_with($path, '/api/')) {
@@ -35,23 +36,29 @@ if (str_starts_with($path, '/api/')) {
         $brands = ['Zara','Massimo Dutti','Bershka','Pull&Bear','Stradivarius','Oysho','Lefties'];
         $brand = trim((string)($_POST['brand'] ?? '')); $name = trim((string)($_POST['name'] ?? '')); $category = trim((string)($_POST['category'] ?? ''));
         if ($name === '' || $category === '' || !in_array($brand, $brands, true)) json_response(['error' => 'Nombre, marca Inditex y categoría son obligatorios.'], 422);
-        $imagePath = null;
+        $imagePath = $thumbPath = null;
         if (!empty($_FILES['image']['tmp_name'])) {
             if ($_FILES['image']['error'] !== UPLOAD_ERR_OK || $_FILES['image']['size'] > 8*1024*1024) json_response(['error' => 'La imagen no es válida o supera 8 MB.'], 422);
-            $finfo = new finfo(FILEINFO_MIME_TYPE); $mime = $finfo->file($_FILES['image']['tmp_name']); $ext = ['image/jpeg'=>'jpg','image/png'=>'png','image/webp'=>'webp'][$mime] ?? null;
-            if (!$ext) json_response(['error' => 'Formato permitido: JPG, PNG o WebP.'], 422);
-            $filename = $uid . '-' . bin2hex(random_bytes(12)) . '.' . $ext; $dest = __DIR__ . '/uploads/' . $filename;
-            if (!move_uploaded_file($_FILES['image']['tmp_name'], $dest)) json_response(['error' => 'No se pudo guardar la foto.'], 500);
-            $imagePath = '/uploads/' . $filename;
+            $finfo = new finfo(FILEINFO_MIME_TYPE); $mime = $finfo->file($_FILES['image']['tmp_name']);
+            if (!in_array($mime, ['image/jpeg','image/png','image/webp'], true)) json_response(['error' => 'Formato permitido: JPG, PNG o WebP.'], 422);
+            if (!is_uploaded_file($_FILES['image']['tmp_name'])) json_response(['error' => 'La imagen no es válida.'], 422);
+            try { [$image, $thumb] = store_garment_image($_FILES['image']['tmp_name'], (string)$mime, __DIR__ . '/uploads', $uid . '-' . bin2hex(random_bytes(12))); }
+            catch (Throwable $e) { error_log('garment image failed: ' . $e->getMessage()); json_response(['error' => 'No se pudo procesar la foto.'], 500); }
+            $imagePath = '/uploads/' . $image; $thumbPath = '/uploads/' . $thumb;
         }
-        $stmt = $pdo->prepare('INSERT INTO garments(user_id,name,brand,reference,category,color,size,season,notes,image_path,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)');
-        $stmt->execute([$uid,$name,$brand,trim((string)($_POST['reference']??'')),$category,trim((string)($_POST['color']??'')),trim((string)($_POST['size']??'')),trim((string)($_POST['season']??'')),trim((string)($_POST['notes']??'')),$imagePath,date(DATE_ATOM)]);
+        $stmt = $pdo->prepare('INSERT INTO garments(user_id,name,brand,reference,category,color,size,season,notes,image_path,thumb_path,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)');
+        $stmt->execute([$uid,$name,$brand,trim((string)($_POST['reference']??'')),$category,trim((string)($_POST['color']??'')),trim((string)($_POST['size']??'')),trim((string)($_POST['season']??'')),trim((string)($_POST['notes']??'')),$imagePath,$thumbPath,date(DATE_ATOM)]);
         json_response(['ok' => true, 'id' => (int)$pdo->lastInsertId()], 201);
     }
     if (preg_match('#^/api/garments/(\d+)$#', $path, $m) && $_SERVER['REQUEST_METHOD'] === 'DELETE') {
-        require_csrf(); $stmt = $pdo->prepare('SELECT image_path FROM garments WHERE id=? AND user_id=?'); $stmt->execute([(int)$m[1],$uid]); $item = $stmt->fetch();
+        require_csrf(); $stmt = $pdo->prepare('SELECT image_path,thumb_path FROM garments WHERE id=? AND user_id=?'); $stmt->execute([(int)$m[1],$uid]); $item = $stmt->fetch();
         if (!$item) json_response(['error'=>'Prenda no encontrada.'],404); $pdo->prepare('DELETE FROM garments WHERE id=? AND user_id=?')->execute([(int)$m[1],$uid]);
-        if ($item['image_path']) { $file = __DIR__ . $item['image_path']; if (is_file($file)) unlink($file); } json_response(['ok'=>true]);
+        foreach ([$item['image_path'], $item['thumb_path']] as $stored) {
+            // Only files this app wrote into uploads/: image_path also points at seed assets.
+            if (!$stored || !str_starts_with((string)$stored, '/uploads/')) continue;
+            $file = __DIR__ . $stored; if (is_file($file)) unlink($file);
+        }
+        json_response(['ok'=>true]);
     }
     if ($path === '/api/profile' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         require_csrf(); $d = request_json(); $allowed = ['style','colors','avoid','sizes','budget','occasions']; $profile=[]; foreach($allowed as $key) $profile[$key]=mb_substr(trim((string)($d[$key]??'')),0,500);
