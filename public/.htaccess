@@ -1,6 +1,20 @@
 Options -Indexes
+
+<IfModule mod_headers.c>
+  # Assets are immutable in practice: every reference goes through asset() in
+  # app/bootstrap.php, which appends a ?v= token that changes with the file, so a deploy
+  # publishes new URLs instead of waiting for a stale copy to expire.
+  <If "%{REQUEST_URI} =~ m#^/assets/.+\.(css|js|png|jpe?g|webp|avif|svg|ico|woff2?)$#">
+    Header set Cache-Control "public, max-age=31536000, immutable"
+  </If>
+  # Uploads are immutable too (random filename, never rewritten), but they are someone's
+  # wardrobe: cache them in the browser, never in a shared cache.
+  <If "%{REQUEST_URI} =~ m#^/uploads/#">
+    Header set Cache-Control "private, max-age=31536000, immutable"
+  </If>
+</IfModule>
+
 RewriteEngine On
 RewriteCond %{REQUEST_FILENAME} !-f
 RewriteCond %{REQUEST_FILENAME} !-d
 RewriteRule ^ index.php [L,QSA]
-

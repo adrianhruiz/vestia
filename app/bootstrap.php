@@ -87,6 +87,22 @@ function sql_statements(string $sql): array {
 }
 
 function e(?string $value): string { return htmlspecialchars($value ?? '', ENT_QUOTES, 'UTF-8'); }
+
+/**
+ * Versioned URL for a file under public/. The token changes whenever the file does, which
+ * is what makes the one-year immutable cache in public/.htaccess safe: a deploy publishes
+ * new URLs instead of waiting for a stale copy to expire.
+ */
+function asset(string $path): string {
+    static $versions = [];
+    if (!array_key_exists($path, $versions)) {
+        $file = APP_ROOT . '/public' . $path;
+        $mtime = is_file($file) ? filemtime($file) : false;
+        $versions[$path] = $mtime === false ? null : substr(dechex($mtime), -8);
+    }
+    return $versions[$path] === null ? $path : $path . '?v=' . $versions[$path];
+}
+
 function json_response(array $data, int $status = 200): never {
     http_response_code($status); header('Content-Type: application/json; charset=utf-8');
     echo json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES); exit;
