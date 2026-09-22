@@ -8,7 +8,7 @@ $$('[data-open-auth]').forEach(b=>b.onclick=()=>setAuth(b.dataset.openAuth));$('
 $('#auth-form')?.addEventListener('submit',async e=>{e.preventDefault();const f=new FormData(e.currentTarget),body=Object.fromEntries(f);const err=$('.form-error',e.currentTarget);err.textContent='';try{await api('/api/'+authMode,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});location.reload()}catch(x){err.textContent=x.message}});
 $('#logout')?.addEventListener('click',async()=>{await api('/api/logout',{method:'POST'});location.reload()});
 if(document.body.dataset.auth==='1'){
- let activeJob=null,pollTimer=null,garmentCache=[];
+ let activeJob=null,pollTimer=null,polling=false,garmentCache=[];
  const switchView=view=>{$$('.view').forEach(v=>v.classList.toggle('active',v.id==='view-'+view));$$('[data-view]').forEach(b=>b.classList.toggle('active',b.dataset.view===view));if(view==='outfits')loadJobs()};$$('[data-view]').forEach(b=>b.onclick=()=>switchView(b.dataset.view));
  $('#add-garment').onclick=()=>openModal('#garment-modal');$('#scan-label').onclick=()=>{$('#garment-modal').hidden=false;$('input[name=image]',$('#garment-form')).click();toast('Fotografía la etiqueta y escribe la referencia visible')};
  const imageInput=$('input[name=image]',$('#garment-form')),preview=$('.upload-preview',$('#garment-form'));let previewUrl='';
@@ -20,11 +20,23 @@ if(document.body.dataset.auth==='1'){
  // The unfiltered wardrobe ships inside the page, so the first paint costs no request.
  Array.isArray(window.APP.garments)?renderGarments(window.APP.garments):loadGarments();
  $('#profile-form').addEventListener('submit',async e=>{e.preventDefault();await api('/api/profile',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.fromEntries(new FormData(e.currentTarget)))});toast('Preferencias guardadas')});
- const startAnalysis=async()=>{try{const d=await api('/api/analyze',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});activeJob=d.job_id;showMini(3);switchView('outfits');pollJob()}catch(x){toast(x.message)}};$('#analyze').onclick=startAnalysis;$('#analyze-top').onclick=startAnalysis;
+ const startAnalysis=async()=>{try{const d=await api('/api/analyze',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});activeJob=d.job_id;showMini(3);switchView('outfits');startPolling()}catch(x){toast(x.message)}};$('#analyze').onclick=startAnalysis;$('#analyze-top').onclick=startAnalysis;
  function showMini(p){$('#job-mini').hidden=false;$('.progress i',$('#job-mini')).style.width=p+'%'}
- async function pollJob(){if(!activeJob)return;try{const {job}=await api('/api/jobs/'+activeJob);showMini(job.progress);renderRunning(job);if(job.status==='completed'||job.status==='failed'){activeJob=null;$('#job-mini').hidden=true;loadJobs();return}}catch(e){toast(e.message)}pollTimer=setTimeout(pollJob,2500)}
+ // One chain at a time. Every entry point used to call pollJob() directly, and pollJob
+ // re-armed itself without clearing the previous timer, so opening Outfits twice left two
+ // independent loops hitting the API every 2.5s for as long as the analysis ran.
+ function startPolling(){if(polling)return;polling=true;pollJob()}
+ function stopPolling(){polling=false;clearTimeout(pollTimer);pollTimer=null}
+ async function pollJob(){
+  if(!activeJob){stopPolling();return}
+  try{const {job}=await api('/api/jobs/'+activeJob);showMini(job.progress);renderRunning(job);
+   if(job.status==='completed'||job.status==='failed'){activeJob=null;stopPolling();$('#job-mini').hidden=true;loadJobs();return}
+  }catch(e){toast(e.message)}
+  if(!polling)return;
+  clearTimeout(pollTimer);pollTimer=setTimeout(pollJob,2500)
+ }
  function renderRunning(j){$('#jobs').innerHTML=`<div class="job-running"><b>${j.status==='failed'?'No se pudo completar':'Tu estilista está trabajando'}</b><p>${j.error?esc(j.error):'Puedes seguir usando la web; el análisis continúa en segundo plano.'}</p><div class="progress"><i style="width:${j.progress}%"></i></div><small>${j.progress}% completado</small></div>`}
- async function loadJobs(){const {jobs}=await api('/api/jobs');const running=jobs.find(j=>['queued','processing'].includes(j.status));if(running){activeJob=running.id;renderRunning(running);pollJob();return}const done=jobs.find(j=>j.status==='completed'&&j.result);if(!done){const failed=jobs.find(j=>j.status==='failed');$('#jobs').innerHTML=failed?`<div class="job-running"><b>Último análisis fallido</b><p>${esc(failed.error)}</p></div>`:'<div class="empty"><b>Aún no hay looks</b><p>Analiza tu armario para crear tus primeras combinaciones.</p></div>';return}renderResult(done.result)}
+ async function loadJobs(){const {jobs}=await api('/api/jobs');const running=jobs.find(j=>['queued','processing'].includes(j.status));if(running){activeJob=running.id;renderRunning(running);startPolling();return}const done=jobs.find(j=>j.status==='completed'&&j.result);if(!done){const failed=jobs.find(j=>j.status==='failed');$('#jobs').innerHTML=failed?`<div class="job-running"><b>Último análisis fallido</b><p>${esc(failed.error)}</p></div>`:'<div class="empty"><b>Aún no hay looks</b><p>Analiza tu armario para crear tus primeras combinaciones.</p></div>';return}renderResult(done.result)}
  function outfitVisual(o){if(o.image_url)return `<img src="${safeAssetUrl(o.image_url)}" alt="Visualización de ${esc(o.name)}" loading="lazy">`;const pieces=(o.garment_ids||[]).map(id=>garmentCache.find(g=>Number(g.id)===Number(id))).filter(g=>thumbOf(g)).slice(0,4);return pieces.length?`<div class="outfit-collage">${pieces.map(g=>`<img src="${safeAssetUrl(thumbOf(g))}" alt="${esc(g.name)}" loading="lazy" decoding="async">`).join('')}</div>`:'<div class="garment-image outfit-placeholder">✦</div>'}
  function renderResult(r){$('#jobs').innerHTML=`<section class="analysis-summary"><h2>La lectura de tu armario</h2><p>${esc(r.summary)}</p><div class="chips">${(r.palette||[]).map(x=>`<span class="chip">${esc(x)}</span>`).join('')}</div></section><div class="outfit-grid">${(r.outfits||[]).map(o=>`<article class="outfit">${outfitVisual(o)}<div class="outfit-body"><span class="occasion">${esc(o.occasion)}</span><h3>${esc(o.name)}</h3><p>${esc(o.reason)}</p>${o.missing_items?.length?`<p><b>Para completar:</b> ${esc(o.missing_items.join(', '))}</p>`:''}${o.shopping?.length?`<div class="shopping"><small>COMPRAR EN INDITEX</small>${o.shopping.map(s=>`<a href="${safeUrl(s.url)}" target="_blank" rel="noopener noreferrer sponsored"><span>${esc(s.brand)} · ${esc(s.name)}</span><b>↗</b></a>`).join('')}</div>`:''}</div></article>`).join('')}</div>`}
  loadJobs();
