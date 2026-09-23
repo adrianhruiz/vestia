@@ -3,6 +3,7 @@ declare(strict_types=1);
 require dirname(__DIR__) . '/app/bootstrap.php';
 require dirname(__DIR__) . '/app/Images.php';
 require dirname(__DIR__) . '/app/Analysis.php';
+require dirname(__DIR__) . '/app/Share.php';
 
 $path = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/';
 if (str_starts_with($path, '/api/')) {
@@ -11,7 +12,10 @@ if (str_starts_with($path, '/api/')) {
         require_csrf(); $d = request_json();
         $name = trim((string)($d['name'] ?? '')); $email = strtolower(trim((string)($d['email'] ?? ''))); $password = (string)($d['password'] ?? '');
         if (mb_strlen($name) < 2 || !filter_var($email, FILTER_VALIDATE_EMAIL) || strlen($password) < 10) json_response(['error' => 'Revisa nombre, email y contraseña (mínimo 10 caracteres).'], 422);
-        try { $stmt = $pdo->prepare('INSERT INTO users(name,email,password_hash,style_profile,created_at) VALUES(?,?,?,?,?)'); $stmt->execute([$name,$email,password_hash($password,PASSWORD_DEFAULT),'{}',date(DATE_ATOM)]); }
+        // The shared look this person came in through, if any. It is read from the session,
+        // which only render_share_page() writes, never from the request body.
+        $ref = isset($_SESSION['ref_share']) && preg_match('/^[a-f0-9]{32}$/', (string)$_SESSION['ref_share']) ? (string)$_SESSION['ref_share'] : null;
+        try { $stmt = $pdo->prepare('INSERT INTO users(name,email,password_hash,style_profile,signup_share_token,created_at) VALUES(?,?,?,?,?,?)'); $stmt->execute([$name,$email,password_hash($password,PASSWORD_DEFAULT),'{}',$ref,date(DATE_ATOM)]); }
         catch (PDOException $e) {
             if (($e->errorInfo[1] ?? 0) === 1062) json_response(['error' => 'Ese email ya está registrado.'], 409);
             error_log('register failed: ' . $e->getMessage());
@@ -124,10 +128,61 @@ if (str_starts_with($path, '/api/')) {
         if($latest){ $stmt=$pdo->prepare('SELECT result_json FROM jobs WHERE id=? AND user_id=?'); $stmt->execute([$latest,$uid]); $raw=$stmt->fetchColumn(); $result=$raw?json_decode($raw,true):null; }
         $stmt=$pdo->prepare('SELECT id,email,is_test FROM users WHERE id=?'); $stmt->execute([$uid]); $user=$stmt->fetch()?:[];
         $left=analysis_limit_exempt($user)?null:max(0,ANALYSES_PER_HOUR-count(recent_analyses($pdo,$uid)));
-        json_response(['jobs'=>$jobs,'result_job_id'=>$latest,'result'=>$result,'analyses_left'=>$left]);
+        // Which of these looks are already public, so every card knows whether its button
+        // says "Compartir" or "Compartido".
+        $shares=[];
+        if($latest){ $stmt=$pdo->prepare('SELECT outfit_index,token,views FROM outfit_shares WHERE job_id=? AND user_id=? AND revoked_at IS NULL'); $stmt->execute([$latest,$uid]);
+            foreach($stmt->fetchAll() as $row) $shares[(int)$row['outfit_index']]=['token'=>$row['token'],'url'=>share_url($row['token']),'views'=>(int)$row['views']]; }
+        json_response(['jobs'=>$jobs,'result_job_id'=>$latest,'result'=>$result,'analyses_left'=>$left,'shares'=>$shares]);
+    }
+    if ($path === '/api/outfits/share' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+        require_csrf(); $d=request_json(); $analysisId=(int)($d['job_id']??0); $index=(int)($d['index']??-1);
+        $stmt=$pdo->prepare("SELECT result_json FROM jobs WHERE id=? AND user_id=? AND type='wardrobe_analysis' AND status='completed'"); $stmt->execute([$analysisId,$uid]); $raw=$stmt->fetchColumn();
+        if ($raw===false) json_response(['error'=>'Análisis no encontrado.'],404);
+        $outfit=(json_decode((string)$raw,true)['outfits']??[])[$index]??null;
+        if (!is_array($outfit)) json_response(['error'=>'Ese look no existe.'],404);
+        $stmt=$pdo->prepare('SELECT id,token,revoked_at,views FROM outfit_shares WHERE job_id=? AND outfit_index=?'); $stmt->execute([$analysisId,$index]); $share=$stmt->fetch();
+        // Already public: hand back the link that is already out there rather than minting a
+        // second one for the same look.
+        if ($share && $share['revoked_at']===null) json_response(['url'=>share_url($share['token']),'token'=>$share['token'],'views'=>(int)$share['views']]);
+        $stmt=$pdo->prepare('SELECT name FROM users WHERE id=?'); $stmt->execute([$uid]); $ownerName=explode(' ',trim((string)$stmt->fetchColumn()))[0];
+        $garments=[]; $ids=array_values(array_unique(array_map('intval',(array)($outfit['garment_ids']??[]))));
+        if ($ids) {
+            $stmt=$pdo->prepare('SELECT id,name,brand,color,category,image_path,thumb_path,source_url FROM garments WHERE user_id=? AND id IN ('.implode(',',array_fill(0,count($ids),'?')).')');
+            $stmt->execute(array_merge([$uid],$ids));
+            foreach($stmt->fetchAll() as $row) $garments[(int)$row['id']]=$row;
+        }
+        $snapshot=share_snapshot($outfit,$garments,$ownerName); $token=share_token();
+        if ($share) {
+            // Re-sharing a look that was retired gets a new token: the old link was pulled on
+            // purpose and must not come back to life in the pocket of whoever still has it.
+            delete_share_images($share['token']);
+            $pdo->prepare('UPDATE outfit_shares SET token=?,snapshot_json=?,views=0,revoked_at=NULL,created_at=? WHERE id=?')->execute([$token,json_encode($snapshot,JSON_UNESCAPED_UNICODE),date(DATE_ATOM),$share['id']]);
+        } else {
+            $active=$pdo->prepare('SELECT COUNT(*) FROM outfit_shares WHERE user_id=? AND revoked_at IS NULL'); $active->execute([$uid]);
+            if ((int)$active->fetchColumn()>=SHARE_MAX_ACTIVE) json_response(['error'=>'Tienes '.SHARE_MAX_ACTIVE.' looks compartidos. Retira alguno para compartir otro.'],409);
+            $pdo->prepare('INSERT INTO outfit_shares(user_id,job_id,outfit_index,token,snapshot_json,created_at) VALUES(?,?,?,?,?,?)')->execute([$uid,$analysisId,$index,$token,json_encode($snapshot,JSON_UNESCAPED_UNICODE),date(DATE_ATOM)]);
+        }
+        // A picture that cannot be drawn is not a reason to refuse the link: the page falls
+        // back to the collage and the preview to the hero.
+        try { store_share_images($snapshot, empty($outfit['image_url'])?null:APP_ROOT.'/storage/outfits/job-'.$analysisId.'-outfit-'.($index+1).'.png', $token); }
+        catch (Throwable $e) { error_log('share image failed: '.$e->getMessage()); }
+        json_response(['url'=>share_url($token),'token'=>$token,'views'=>0],201);
+    }
+    if ($path === '/api/outfits/unshare' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+        require_csrf(); $d=request_json();
+        $stmt=$pdo->prepare('SELECT id,token FROM outfit_shares WHERE token=? AND user_id=? AND revoked_at IS NULL'); $stmt->execute([(string)($d['token']??''),$uid]); $share=$stmt->fetch();
+        if (!$share) json_response(['error'=>'Ese enlace no existe o ya lo habías retirado.'],404);
+        $pdo->prepare('UPDATE outfit_shares SET revoked_at=? WHERE id=?')->execute([date(DATE_ATOM),$share['id']]);
+        delete_share_images($share['token']);
+        json_response(['ok'=>true]);
     }
     json_response(['error'=>'Ruta no encontrada.'],404);
 }
+
+// A shared look. Routed here rather than through a RewriteRule because the built-in server
+// the README starts in local has no .htaccess and falls back to this file on its own.
+if (preg_match('#^/o/([a-f0-9]{32})$#', $path, $m)) render_share_page($m[1]);
 
 $currentUser = null; $profile=[]; $garments=null;
 if ($uid=user_id()) {
@@ -152,4 +207,5 @@ $garmentCount = $garments === null ? 0 : count($garments);
 <?php endif ?>
 <div class="modal" id="auth-modal" hidden><div class="modal-card auth-card"><button class="close" data-close>×</button><span class="eyebrow">BIENVENIDO A VESTIA</span><h2 id="auth-title">Entrar</h2><form id="auth-form"><label class="register-only">Nombre<input name="name" autocomplete="name"></label><label>Email<input type="email" name="email" required autocomplete="email"></label><label>Contraseña<input type="password" name="password" required minlength="10" autocomplete="current-password"></label><button class="btn btn-coral full">Continuar</button><p class="form-error"></p></form><button class="text-btn" id="auth-switch">¿No tienes cuenta? Crear armario</button></div></div>
 <div class="modal" id="garment-modal" hidden><div class="modal-card wide"><button class="close" data-close>×</button><span class="eyebrow">NUEVA PRENDA</span><h2>Añade algo a tu armario</h2><form id="garment-form" enctype="multipart/form-data"><label class="dropzone"><input type="file" name="image" accept="image/jpeg,image/png,image/webp" capture="environment"><img class="upload-preview" alt="Vista previa de la prenda" hidden><b>＋ Añadir foto</b><span>JPG, PNG o WebP · máx. 8 MB</span></label><div class="form-grid"><label>Nombre<input name="name" required placeholder="Camisa fluida"></label><label>Marca<select name="brand" required><option>Zara</option><option>Massimo Dutti</option><option>Bershka</option><option>Pull&Bear</option><option>Stradivarius</option><option>Oysho</option><option>Lefties</option></select></label><label>Referencia de etiqueta<input name="reference" placeholder="Ej. 7545/043/800"></label><label>Categoría<select name="category" required><option>Partes de arriba</option><option>Partes de abajo</option><option>Vestidos</option><option>Abrigos</option><option>Calzado</option><option>Accesorios</option></select></label><label>Color<input name="color" placeholder="Crudo"></label><label>Talla<input name="size" placeholder="M"></label><label>Temporada<select name="season"><option>Todo el año</option><option>Primavera / verano</option><option>Otoño / invierno</option></select></label><label>Notas<input name="notes" placeholder="Corte oversize, lino…"></label></div><button class="btn btn-dark full">Guardar prenda</button><p class="form-error"></p></form></div></div>
+<?php if($currentUser): ?><div class="modal" id="share-modal" hidden><div class="modal-card"><button class="close" data-close>×</button><span class="eyebrow">COMPARTIR LOOK</span><h2 id="share-title">Compartir</h2><p class="share-note">Cualquiera con el enlace podrá ver este look y las prendas que lo componen. El resto de tu armario y de tu análisis no se comparte.</p><label class="share-link">Enlace<input id="share-url" readonly value="Creando el enlace…"></label><div class="share-actions"><button class="btn btn-dark" id="share-copy">Copiar enlace</button><button class="btn btn-coral" id="share-native" hidden>Compartir…</button></div><p class="share-stats" id="share-stats"></p><button class="text-btn" id="share-revoke" hidden>Dejar de compartir</button><p class="form-error"></p></div></div><?php endif ?>
 <div id="toast" role="status"></div><script>window.APP=<?= json_encode(['csrf'=>csrf_token(),'garments'=>$garments], JSON_UNESCAPED_UNICODE|JSON_HEX_TAG|JSON_HEX_AMP|JSON_HEX_APOS|JSON_HEX_QUOT) ?>;</script><script src="<?= asset('/assets/app.js') ?>"></script></body></html>

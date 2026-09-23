@@ -5,10 +5,13 @@ const openModal=id=>$(id).hidden=false;const closeModal=m=>m.closest('.modal').h
 $$('[data-close]').forEach(b=>b.onclick=()=>closeModal(b));$$('.modal').forEach(m=>m.onclick=e=>{if(e.target===m)m.hidden=true});
 let authMode='login';function setAuth(mode){authMode=mode;$('#auth-title').textContent=mode==='login'?'Entrar':'Crea tu armario';$('.register-only').style.display=mode==='register'?'grid':'none';$('#auth-switch').textContent=mode==='login'?'¿No tienes cuenta? Crear armario':'Ya tengo cuenta';openModal('#auth-modal')}
 $$('[data-open-auth]').forEach(b=>b.onclick=()=>setAuth(b.dataset.openAuth));$('#auth-switch')?.addEventListener('click',()=>setAuth(authMode==='login'?'register':'login'));
-$('#auth-form')?.addEventListener('submit',async e=>{e.preventDefault();const f=new FormData(e.currentTarget),body=Object.fromEntries(f);const err=$('.form-error',e.currentTarget);err.textContent='';try{await api('/api/'+authMode,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});location.reload()}catch(x){err.textContent=x.message}});
+$('#auth-form')?.addEventListener('submit',async e=>{e.preventDefault();const f=new FormData(e.currentTarget),body=Object.fromEntries(f);const err=$('.form-error',e.currentTarget);err.textContent='';try{await api('/api/'+authMode,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});window.APP.after_auth?location.assign(window.APP.after_auth):location.reload()}catch(x){err.textContent=x.message}});
 $('#logout')?.addEventListener('click',async()=>{await api('/api/logout',{method:'POST'});location.reload()});
 if(document.body.dataset.auth==='1'){
- let activeJob=null,pollTimer=null,polling=false,garmentCache=[],resultJobId=null;
+ let activeJob=null,pollTimer=null,polling=false,garmentCache=[],resultJobId=null,lastResult=null,shares={};
+ // Arriving from a shared look and registering lands on an empty wardrobe, which is the
+ // worst possible answer to someone who has just decided they want this.
+ if(new URLSearchParams(location.search).has('nueva-prenda')){openModal('#garment-modal');history.replaceState(null,'','/')}
  // An analysis takes one to three minutes. Polling it at a flat 2.5s meant ~50 requests
  // per run, so back off towards 10s, stop while the tab is in the background, and give up
  // rather than poll a job that is never going to answer.
@@ -74,9 +77,9 @@ if(document.body.dataset.auth==='1'){
   // null means an exempt account; there is no number worth showing there.
   el.textContent=left===null||left===undefined?'':left>0?`${left} ${left===1?'análisis restante':'análisis restantes'} esta hora`:'Sin análisis disponibles hasta dentro de un rato';
  }
- async function loadJobs(){const d=await api('/api/jobs'),{jobs,result}=d;showQuota(d.analyses_left);const running=jobs.find(j=>['queued','processing'].includes(j.status));if(running){activeJob=running.id;renderRunning(running);startPolling();return}if(result){resultJobId=d.result_job_id;renderResult(result);return}const last=jobs[0];$('#jobs').innerHTML=last&&last.status==='failed'?`<div class="job-running"><b>Último análisis fallido</b><p>${esc(last.error)}</p></div>`:last&&last.status==='cancelled'?'<div class="job-running"><b>Análisis cancelado</b><p>Puedes lanzar uno nuevo cuando quieras.</p></div>':'<div class="empty"><b>Aún no hay looks</b><p>Analiza tu armario para crear tus primeras combinaciones.</p></div>'}
+ async function loadJobs(){const d=await api('/api/jobs'),{jobs,result}=d;showQuota(d.analyses_left);const running=jobs.find(j=>['queued','processing'].includes(j.status));if(running){activeJob=running.id;renderRunning(running);startPolling();return}if(result){resultJobId=d.result_job_id;shares=d.shares||{};renderResult(result);return}const last=jobs[0];$('#jobs').innerHTML=last&&last.status==='failed'?`<div class="job-running"><b>Último análisis fallido</b><p>${esc(last.error)}</p></div>`:last&&last.status==='cancelled'?'<div class="job-running"><b>Análisis cancelado</b><p>Puedes lanzar uno nuevo cuando quieras.</p></div>':'<div class="empty"><b>Aún no hay looks</b><p>Analiza tu armario para crear tus primeras combinaciones.</p></div>'}
  function outfitVisual(o){if(o.image_url)return `<img src="${safeAssetUrl(o.image_url)}" alt="Visualización de ${esc(o.name)}" loading="lazy">`;const pieces=(o.garment_ids||[]).map(id=>garmentCache.find(g=>Number(g.id)===Number(id))).filter(g=>thumbOf(g)).slice(0,4);return pieces.length?`<div class="outfit-collage">${pieces.map(g=>`<img src="${safeAssetUrl(thumbOf(g))}" alt="${esc(g.name)}" loading="lazy" decoding="async">`).join('')}</div>`:'<div class="garment-image outfit-placeholder">✦</div>'}
- function renderResult(r){$('#jobs').innerHTML=`<section class="analysis-summary"><h2>La lectura de tu armario</h2><p>${esc(r.summary)}</p><div class="chips">${(r.palette||[]).map(x=>`<span class="chip">${esc(x)}</span>`).join('')}</div></section><div class="outfit-grid">${(r.outfits||[]).map((o,i)=>`<article class="outfit">${outfitVisual(o)}<div class="outfit-body"><span class="occasion">${esc(o.occasion)}</span><h3>${esc(o.name)}</h3><p>${esc(o.reason)}</p>${o.missing_items?.length?`<p><b>Para completar:</b> ${esc(o.missing_items.join(', '))}</p>`:''}${o.shopping?.length?`<div class="shopping"><small>COMPRAR EN INDITEX</small>${o.shopping.map(s=>`<a href="${safeUrl(s.url)}" target="_blank" rel="noopener noreferrer sponsored"><span>${esc(s.brand)} · ${esc(s.name)}</span><b>↗</b></a>`).join('')}</div>`:''}${o.image_url?'':`<button class="btn btn-soft full draw-outfit" data-outfit="${i}">✦ Generar visual</button>`}</div></article>`).join('')}</div>`;$$('.draw-outfit').forEach(b=>b.onclick=()=>drawOutfit(b))}
+ function renderResult(r){lastResult=r;$('#jobs').innerHTML=`<section class="analysis-summary"><h2>La lectura de tu armario</h2><p>${esc(r.summary)}</p><div class="chips">${(r.palette||[]).map(x=>`<span class="chip">${esc(x)}</span>`).join('')}</div></section><div class="outfit-grid">${(r.outfits||[]).map((o,i)=>`<article class="outfit">${outfitVisual(o)}<div class="outfit-body"><span class="occasion">${esc(o.occasion)}</span><h3>${esc(o.name)}</h3><p>${esc(o.reason)}</p>${o.missing_items?.length?`<p><b>Para completar:</b> ${esc(o.missing_items.join(', '))}</p>`:''}${o.shopping?.length?`<div class="shopping"><small>COMPRAR EN INDITEX</small>${o.shopping.map(s=>`<a href="${safeUrl(s.url)}" target="_blank" rel="noopener noreferrer sponsored"><span>${esc(s.brand)} · ${esc(s.name)}</span><b>↗</b></a>`).join('')}</div>`:''}${o.image_url?'':`<button class="btn btn-soft full draw-outfit" data-outfit="${i}">✦ Generar visual</button>`}<button class="btn btn-soft full share-outfit" data-outfit="${i}">${shares[i]?`↗ Compartido${shares[i].views?` · ${shares[i].views} ${shares[i].views===1?'visita':'visitas'}`:''}`:'↗ Compartir look'}</button></div></article>`).join('')}</div>`;$$('.draw-outfit').forEach(b=>b.onclick=()=>drawOutfit(b));$$('.share-outfit').forEach(b=>b.onclick=()=>openShare(Number(b.dataset.outfit)))}
  // Pictures are drawn one at a time, when someone asks. An analysis used to generate all
  // five up front, so four of them were usually paid for and never looked at.
  async function drawOutfit(button){
@@ -99,6 +102,45 @@ if(document.body.dataset.auth==='1'){
   }
   throw new Error('La imagen está tardando demasiado. Recarga la página en un minuto.')
  }
+ // Sharing is a modal rather than a straight navigator.share() on the click. The link has
+ // to be created first, and an await before share() spends the transient user activation it
+ // requires, so Safari and Firefox refuse it. The modal opens on the click, the link arrives
+ // while it opens, and its own button is a fresh gesture. It is also the only place "dejar
+ // de compartir" can live.
+ let sharing=null;
+ async function openShare(index){
+  const outfit=lastResult?.outfits?.[index];if(!outfit||resultJobId===null)return;
+  sharing=null;
+  $('#share-title').textContent=outfit.name;
+  $('#share-url').value='Creando el enlace…';$('#share-stats').textContent='';
+  $('#share-native').hidden=!navigator.share;$('#share-revoke').hidden=true;
+  $('.form-error',$('#share-modal')).textContent='';
+  openModal('#share-modal');
+  try{
+   const d=await api('/api/outfits/share',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({job_id:resultJobId,index})});
+   sharing={index,...d};shares[index]=d;
+   $('#share-url').value=d.url;$('#share-revoke').hidden=false;
+   $('#share-stats').textContent=d.views?`${d.views} ${d.views===1?'visita':'visitas'} hasta ahora`:'Nadie lo ha abierto todavía';
+   renderResult(lastResult)
+  }catch(x){$('#share-url').value='';$('.form-error',$('#share-modal')).textContent=x.message}
+ }
+ $('#share-copy')?.addEventListener('click',async()=>{
+  if(!sharing)return;
+  try{await navigator.clipboard.writeText(sharing.url);toast('Enlace copiado')}
+  // No clipboard API outside a secure context: leave it selected so the copy is one keystroke.
+  catch{$('#share-url').select();toast('Copia el enlace con Ctrl+C')}
+ });
+ $('#share-native')?.addEventListener('click',async()=>{
+  if(!sharing)return;
+  try{await navigator.share({title:$('#share-title').textContent,text:`Mira este look: ${$('#share-title').textContent}`,url:sharing.url})}
+  catch(x){if(x.name!=='AbortError')toast('No se pudo abrir el menú de compartir')}
+ });
+ $('#share-revoke')?.addEventListener('click',async()=>{
+  if(!sharing||!confirm('¿Dejar de compartir este look? Quien tenga el enlace dejará de verlo.'))return;
+  try{await api('/api/outfits/unshare',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:sharing.token})});
+   delete shares[sharing.index];sharing=null;$('#share-modal').hidden=true;toast('El enlace ya no funciona');renderResult(lastResult)}
+  catch(x){$('.form-error',$('#share-modal')).textContent=x.message}
+ });
  loadJobs();
 }
 function esc(v=''){const d=document.createElement('div');d.textContent=String(v);return d.innerHTML}function safeUrl(u=''){try{const x=new URL(u);return x.protocol==='https:'?x.href:'#'}catch{return '#'}}function safeAssetUrl(u=''){try{const x=new URL(u,location.origin);return x.origin===location.origin?x.href:'#'}catch{return '#'}}function thumbOf(g){return g?.thumb_path||g?.image_path||''}function garmentIcon(category=''){return {'Partes de arriba':'♙','Partes de abajo':'♜','Vestidos':'♕','Abrigos':'♖','Calzado':'♢','Accesorios':'○'}[category]||'♧'}

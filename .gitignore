@@ -8,6 +8,8 @@
 !/public/uploads/.gitkeep
 /storage/outfits/*
 !/storage/outfits/.gitkeep
+/storage/shares/*
+!/storage/shares/.gitkeep
 /storage/logs/*
 !/storage/logs/.gitkeep
 /storage/*.sqlite*

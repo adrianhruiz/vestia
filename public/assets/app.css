@@ -22,3 +22,34 @@
 .outfit-collage img{width:100%;height:100%;aspect-ratio:auto;object-fit:cover;background:#e6e8df}
 .outfit-collage img:only-child{grid-column:1/-1}
 .outfit-placeholder{height:340px}
+
+/* The shared look at /o/{token}. It reuses the wardrobe's own cards and the landing's
+   "Cómo funciona", so a stranger arriving from a chat lands on Vestia, not on a data page. */
+.share{max-width:1080px;margin:0 auto;padding:clamp(28px,5vw,60px) clamp(16px,4vw,32px);display:grid;gap:clamp(36px,6vw,64px)}
+.share-look{display:grid;grid-template-columns:minmax(0,5fr) minmax(0,6fr);gap:clamp(24px,4vw,48px);align-items:start}
+.share-figure{margin:0;background:#e6e8df;overflow:hidden}
+.share-figure img{display:block;width:100%;height:auto}
+.share-figure .outfit-collage{height:min(64vh,520px)}
+.share-intro h1{font:600 clamp(36px,5vw,56px)/1.05 'Playfair Display',serif;margin:10px 0 14px;letter-spacing:-1.5px}
+.share-owner{margin:0 0 18px;color:var(--muted);font-size:13px}
+.share-owner b{color:var(--ink)}
+.share-reason{font-size:16px;line-height:1.7;color:#5c6b65;margin:0 0 26px}
+.share-pieces h2,.share-missing h2,.share-cta h2{font:600 clamp(26px,3vw,34px) 'Playfair Display',serif;margin:0 0 20px}
+.share-missing .chips{margin-bottom:18px}
+.share-missing .chip{background:var(--sage);color:var(--ink)}
+.share-missing .shopping{background:#fff;border:1px solid var(--line);padding:18px 22px}
+.share-cta{background:var(--ink);color:#fff;padding:clamp(32px,5vw,56px);text-align:center}
+.share-cta h2{color:#fff}
+.share-cta p{color:#c7d8d1;max-width:520px;margin:0 auto 24px;line-height:1.6}
+.share-cta small{display:block;margin-top:12px;color:#9fb7ae;font-size:11px}
+.share .garment h3{font:600 20px 'Playfair Display',serif;margin:7px 0}
+@media(max-width:900px){.share-look{grid-template-columns:1fr}}
+
+/* Share modal. */
+.share-note{font-size:12px;line-height:1.6;color:var(--muted);margin:0 0 18px}
+.share-link{display:grid;gap:8px;font-size:12px;font-weight:700}
+.share-link input{border:1px solid var(--line);background:#faf9f5;border-radius:3px;padding:13px;font:400 13px 'DM Sans';color:var(--ink);width:100%}
+.share-actions{display:flex;gap:10px;margin-top:16px}
+.share-actions .btn{flex:1}
+.share-stats{font-size:11px;color:var(--muted);margin:14px 0 0}
+.share-outfit{margin-top:10px}
