@@ -20,7 +20,9 @@ date_default_timezone_set('Europe/Madrid');
 $secure = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off');
 session_name('vestia_session');
 session_set_cookie_params(['lifetime' => 0, 'path' => '/', 'secure' => $secure, 'httponly' => true, 'samesite' => 'Lax']);
-if (PHP_SAPI !== 'cli' && session_status() !== PHP_SESSION_ACTIVE) session_start();
+// VESTIA_NO_SESSION is for the public endpoints a stranger or a crawler hits: they have no
+// account to read and no business being handed a cookie. share-image.php defines it.
+if (PHP_SAPI !== 'cli' && !defined('VESTIA_NO_SESSION') && session_status() !== PHP_SESSION_ACTIVE) session_start();
 
 function env(string $key, ?string $default = null): ?string {
     $value = getenv($key);
