@@ -1,0 +1,11 @@
+-- Marks the accounts that exist so we can try things: the demo user and the per-developer
+-- slot accounts. They are exempt from the hourly analysis limit, because the whole point of
+-- them is running analyses back to back.
+--
+-- The flag is set by the seed scripts, never by registration, so a real user cannot get it
+-- by picking a particular email. RATE_LIMIT_EXEMPT_EMAILS in .env exempts an account
+-- without a migration when a slot needs one on the spot.
+--
+-- ADD COLUMN IF NOT EXISTS is MariaDB syntax, which is what every VPS environment runs.
+-- MySQL 8 rejects it: drop the IF NOT EXISTS there and run the file once.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS is_test TINYINT(1) NOT NULL DEFAULT 0;

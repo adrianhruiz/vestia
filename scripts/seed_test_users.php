@@ -35,8 +35,10 @@ try {
         $lookup->execute([$email]);
         $userId = (int)$lookup->fetchColumn();
         if ($userId) {
-            // A repeat run must never reset a password or replace an existing wardrobe.
-            echo "Skipped existing account: {$email}\n";
+            // A repeat run must never reset a password or replace an existing wardrobe, but
+            // an account created before is_test existed still has to be flagged as a test one.
+            $pdo->prepare('UPDATE users SET is_test=1 WHERE id=?')->execute([$userId]);
+            echo "Skipped existing account (marked as test): {$email}\n";
             continue;
         }
         $profile = json_encode([
@@ -47,7 +49,7 @@ try {
             'budget' => 'Hasta 150 € por outfit',
             'occasions' => 'Trabajo, fin de semana, cenas y deporte',
         ], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
-        $pdo->prepare('INSERT INTO users(name,email,password_hash,style_profile,created_at) VALUES(?,?,?,?,?)')
+        $pdo->prepare('INSERT INTO users(name,email,password_hash,style_profile,is_test,created_at) VALUES(?,?,?,?,1,?)')
             ->execute([$name, $email, password_hash($credentials[$name], PASSWORD_DEFAULT), $profile, date(DATE_ATOM)]);
         $userId = (int)$pdo->lastInsertId();
         $insert = $pdo->prepare('INSERT INTO garments(user_id,name,brand,reference,category,color,size,season,notes,image_path,thumb_path,favorite,wear_count,created_at,source_url,price_note) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)');
