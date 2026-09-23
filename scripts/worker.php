@@ -3,6 +3,7 @@
 declare(strict_types=1);
 require dirname(__DIR__) . '/app/bootstrap.php';
 require APP_ROOT . '/app/OpenAI.php';
+require APP_ROOT . '/app/Analysis.php';
 
 /** Thrown when the user asked to stop a run, so the catch below can tell it from a failure. */
 final class JobCancelled extends RuntimeException {}
@@ -34,10 +35,7 @@ do {
         load_env(APP_ROOT . '/.env');
         $key = env('OPENAI_API_KEY', '');
         if ($key === '') throw new RuntimeException('Configura OPENAI_API_KEY en .env.');
-        $limit = max(1, (int)env('ANALYSIS_MAX_ITEMS', '40'));
-        $stmt = $pdo->prepare('SELECT id,name,brand,reference,category,color,size,season,notes,image_path FROM garments WHERE user_id=? ORDER BY favorite DESC, created_at DESC LIMIT ?');
-        $stmt->bindValue(1, (int)$job['user_id'], PDO::PARAM_INT); $stmt->bindValue(2, $limit, PDO::PARAM_INT); $stmt->execute();
-        $garments = $stmt->fetchAll();
+        $garments = analysis_garments($pdo, (int) $job['user_id']);
         if (count($garments) < 2) throw new RuntimeException('Añade al menos dos prendas antes de analizar.');
         $input = json_decode($job['input_json'], true) ?: [];
         $ai = new OpenAI($key);

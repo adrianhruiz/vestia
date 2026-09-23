@@ -39,7 +39,9 @@ final class OpenAI {
             'tools' => [['type' => 'web_search', 'filters' => ['allowed_domains' => ['zara.com','massimodutti.com','bershka.com','pullandbear.com','stradivarius.com','oysho.com','lefties.com']]]],
             'include' => ['web_search_call.action.sources'],
             'text' => ['format' => ['type' => 'json_schema', 'name' => 'wardrobe_analysis', 'strict' => true, 'schema' => $schema]],
-            'max_output_tokens' => 5000,
+            // The schema tops out at five outfits with three shopping links each; 5000 was
+            // paying for headroom nothing could use.
+            'max_output_tokens' => 2500,
             'store' => false,
         ];
         $response = $this->request('/responses', $payload);
