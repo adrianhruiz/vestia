@@ -86,6 +86,29 @@ function sql_statements(string $sql): array {
     return array_values(array_filter($parts, static fn(string $part): bool => $part !== ''));
 }
 
+/**
+ * The only keys the stylist ever receives about a person. Both the profile form and the
+ * analysis request filter through this: whatever reaches the model has to be something we
+ * asked for, at a length we chose.
+ */
+const STYLE_PROFILE_KEYS = ['style', 'colors', 'avoid', 'sizes', 'budget', 'occasions'];
+const STYLE_PROFILE_MAX_LENGTH = 500;
+
+/** Keeps only the known keys, as trimmed strings, capped. Anything else is dropped. */
+function style_profile(array ...$sources): array {
+    $profile = [];
+    foreach (STYLE_PROFILE_KEYS as $key) {
+        foreach ($sources as $source) {
+            if (!isset($source[$key]) || !is_scalar($source[$key])) continue;
+            $value = trim((string) $source[$key]);
+            if ($value === '') continue;
+            $profile[$key] = mb_substr($value, 0, STYLE_PROFILE_MAX_LENGTH);
+            break;
+        }
+    }
+    return $profile;
+}
+
 function e(?string $value): string { return htmlspecialchars($value ?? '', ENT_QUOTES, 'UTF-8'); }
 
 /**
