@@ -30,3 +30,23 @@ function analysis_garments(PDO $pdo, int $userId): array {
     }
     return $garments;
 }
+
+/**
+ * Bump when the instructions or the schema change enough that an old answer is no longer
+ * the answer we would give today, so fingerprints from before stop matching.
+ */
+const ANALYSIS_PROMPT_VERSION = 1;
+
+/**
+ * Everything that decides what the stylist replies, in one hash. The garments are the rows
+ * as they are actually sent, so editing a note or a colour changes the fingerprint on its
+ * own — there is no separate "has the wardrobe changed" flag to keep in sync.
+ */
+function analysis_fingerprint(array $garments, array $input): string {
+    return hash('sha256', (string) json_encode([
+        'garments' => $garments,
+        'input' => $input,
+        'model' => env('OPENAI_MODEL', ''),
+        'prompt' => ANALYSIS_PROMPT_VERSION,
+    ], JSON_UNESCAPED_UNICODE));
+}

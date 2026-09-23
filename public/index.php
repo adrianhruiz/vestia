@@ -2,6 +2,7 @@
 declare(strict_types=1);
 require dirname(__DIR__) . '/app/bootstrap.php';
 require dirname(__DIR__) . '/app/Images.php';
+require dirname(__DIR__) . '/app/Analysis.php';
 
 $path = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/';
 if (str_starts_with($path, '/api/')) {
@@ -73,7 +74,13 @@ if (str_starts_with($path, '/api/')) {
         // posted became prompt we paid for. It gets the same six capped keys as the form.
         $body=request_json();
         $input=['preferences'=>style_profile($body,$profile?:[]),'shopping'=>!empty($body['shopping'])];
-        $stmt=$pdo->prepare("INSERT INTO jobs(user_id,type,status,input_json,created_at) VALUES(?,'wardrobe_analysis','queued',?,?)"); $stmt->execute([$uid,json_encode($input,JSON_UNESCAPED_UNICODE),date(DATE_ATOM)]);
+        $fingerprint=analysis_fingerprint(analysis_garments($pdo,$uid),$input);
+        // Same wardrobe, same profile, same question: the answer is already upstairs.
+        if (empty($body['force'])) {
+            $stmt=$pdo->prepare("SELECT id,finished_at FROM jobs WHERE user_id=? AND type='wardrobe_analysis' AND status='completed' AND fingerprint=? ORDER BY id DESC LIMIT 1"); $stmt->execute([$uid,$fingerprint]);
+            if ($previous=$stmt->fetch()) json_response(['reused'=>true,'job_id'=>(int)$previous['id'],'finished_at'=>$previous['finished_at']]);
+        }
+        $stmt=$pdo->prepare("INSERT INTO jobs(user_id,type,fingerprint,status,input_json,created_at) VALUES(?,'wardrobe_analysis',?,'queued',?,?)"); $stmt->execute([$uid,$fingerprint,json_encode($input,JSON_UNESCAPED_UNICODE),date(DATE_ATOM)]);
         json_response(['job_id'=>(int)$pdo->lastInsertId()],202);
     }
     if (preg_match('#^/api/jobs/(\d+)/outfits/(\d+)/image$#',$path,$m) && $_SERVER['REQUEST_METHOD']==='POST') {
