@@ -8,7 +8,7 @@ $$('[data-open-auth]').forEach(b=>b.onclick=()=>setAuth(b.dataset.openAuth));$('
 $('#auth-form')?.addEventListener('submit',async e=>{e.preventDefault();const f=new FormData(e.currentTarget),body=Object.fromEntries(f);const err=$('.form-error',e.currentTarget);err.textContent='';try{await api('/api/'+authMode,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});location.reload()}catch(x){err.textContent=x.message}});
 $('#logout')?.addEventListener('click',async()=>{await api('/api/logout',{method:'POST'});location.reload()});
 if(document.body.dataset.auth==='1'){
- let activeJob=null,pollTimer=null,polling=false,garmentCache=[];
+ let activeJob=null,pollTimer=null,polling=false,garmentCache=[],resultJobId=null;
  // An analysis takes one to three minutes. Polling it at a flat 2.5s meant ~50 requests
  // per run, so back off towards 10s, stop while the tab is in the background, and give up
  // rather than poll a job that is never going to answer.
@@ -57,9 +57,31 @@ if(document.body.dataset.auth==='1'){
    catch(x){cancel.disabled=false;toast(x.message)}
   }
  }
- async function loadJobs(){const {jobs,result}=await api('/api/jobs');const running=jobs.find(j=>['queued','processing'].includes(j.status));if(running){activeJob=running.id;renderRunning(running);startPolling();return}if(result){renderResult(result);return}const last=jobs[0];$('#jobs').innerHTML=last&&last.status==='failed'?`<div class="job-running"><b>Último análisis fallido</b><p>${esc(last.error)}</p></div>`:last&&last.status==='cancelled'?'<div class="job-running"><b>Análisis cancelado</b><p>Puedes lanzar uno nuevo cuando quieras.</p></div>':'<div class="empty"><b>Aún no hay looks</b><p>Analiza tu armario para crear tus primeras combinaciones.</p></div>'}
+ async function loadJobs(){const d=await api('/api/jobs'),{jobs,result}=d;const running=jobs.find(j=>['queued','processing'].includes(j.status));if(running){activeJob=running.id;renderRunning(running);startPolling();return}if(result){resultJobId=d.result_job_id;renderResult(result);return}const last=jobs[0];$('#jobs').innerHTML=last&&last.status==='failed'?`<div class="job-running"><b>Último análisis fallido</b><p>${esc(last.error)}</p></div>`:last&&last.status==='cancelled'?'<div class="job-running"><b>Análisis cancelado</b><p>Puedes lanzar uno nuevo cuando quieras.</p></div>':'<div class="empty"><b>Aún no hay looks</b><p>Analiza tu armario para crear tus primeras combinaciones.</p></div>'}
  function outfitVisual(o){if(o.image_url)return `<img src="${safeAssetUrl(o.image_url)}" alt="Visualización de ${esc(o.name)}" loading="lazy">`;const pieces=(o.garment_ids||[]).map(id=>garmentCache.find(g=>Number(g.id)===Number(id))).filter(g=>thumbOf(g)).slice(0,4);return pieces.length?`<div class="outfit-collage">${pieces.map(g=>`<img src="${safeAssetUrl(thumbOf(g))}" alt="${esc(g.name)}" loading="lazy" decoding="async">`).join('')}</div>`:'<div class="garment-image outfit-placeholder">✦</div>'}
- function renderResult(r){$('#jobs').innerHTML=`<section class="analysis-summary"><h2>La lectura de tu armario</h2><p>${esc(r.summary)}</p><div class="chips">${(r.palette||[]).map(x=>`<span class="chip">${esc(x)}</span>`).join('')}</div></section><div class="outfit-grid">${(r.outfits||[]).map(o=>`<article class="outfit">${outfitVisual(o)}<div class="outfit-body"><span class="occasion">${esc(o.occasion)}</span><h3>${esc(o.name)}</h3><p>${esc(o.reason)}</p>${o.missing_items?.length?`<p><b>Para completar:</b> ${esc(o.missing_items.join(', '))}</p>`:''}${o.shopping?.length?`<div class="shopping"><small>COMPRAR EN INDITEX</small>${o.shopping.map(s=>`<a href="${safeUrl(s.url)}" target="_blank" rel="noopener noreferrer sponsored"><span>${esc(s.brand)} · ${esc(s.name)}</span><b>↗</b></a>`).join('')}</div>`:''}</div></article>`).join('')}</div>`}
+ function renderResult(r){$('#jobs').innerHTML=`<section class="analysis-summary"><h2>La lectura de tu armario</h2><p>${esc(r.summary)}</p><div class="chips">${(r.palette||[]).map(x=>`<span class="chip">${esc(x)}</span>`).join('')}</div></section><div class="outfit-grid">${(r.outfits||[]).map((o,i)=>`<article class="outfit">${outfitVisual(o)}<div class="outfit-body"><span class="occasion">${esc(o.occasion)}</span><h3>${esc(o.name)}</h3><p>${esc(o.reason)}</p>${o.missing_items?.length?`<p><b>Para completar:</b> ${esc(o.missing_items.join(', '))}</p>`:''}${o.shopping?.length?`<div class="shopping"><small>COMPRAR EN INDITEX</small>${o.shopping.map(s=>`<a href="${safeUrl(s.url)}" target="_blank" rel="noopener noreferrer sponsored"><span>${esc(s.brand)} · ${esc(s.name)}</span><b>↗</b></a>`).join('')}</div>`:''}${o.image_url?'':`<button class="btn btn-soft full draw-outfit" data-outfit="${i}">✦ Generar visual</button>`}</div></article>`).join('')}</div>`;$$('.draw-outfit').forEach(b=>b.onclick=()=>drawOutfit(b))}
+ // Pictures are drawn one at a time, when someone asks. An analysis used to generate all
+ // five up front, so four of them were usually paid for and never looked at.
+ async function drawOutfit(button){
+  if(resultJobId===null)return;
+  const label=button.textContent;
+  button.disabled=true;button.textContent='Dibujando…';
+  try{
+   const d=await api(`/api/jobs/${resultJobId}/outfits/${button.dataset.outfit}/image`,{method:'POST'});
+   if(!d.ready)await waitForJob(d.job_id);
+   loadJobs()
+  }catch(x){button.disabled=false;button.textContent=label;toast(x.message)}
+ }
+ async function waitForJob(id){
+  const deadline=Date.now()+5*60*1000;
+  for(let wait=2000;Date.now()<deadline;wait=Math.min(Math.round(wait*1.4),10000)){
+   await new Promise(resolve=>setTimeout(resolve,wait));
+   const {job}=await api('/api/jobs/'+id);
+   if(job.status==='completed')return;
+   if(!['queued','processing'].includes(job.status))throw new Error(job.error||'No se pudo generar la imagen.')
+  }
+  throw new Error('La imagen está tardando demasiado. Recarga la página en un minuto.')
+ }
  loadJobs();
 }
 function esc(v=''){const d=document.createElement('div');d.textContent=String(v);return d.innerHTML}function safeUrl(u=''){try{const x=new URL(u);return x.protocol==='https:'?x.href:'#'}catch{return '#'}}function safeAssetUrl(u=''){try{const x=new URL(u,location.origin);return x.origin===location.origin?x.href:'#'}catch{return '#'}}function thumbOf(g){return g?.thumb_path||g?.image_path||''}function garmentIcon(category=''){return {'Partes de arriba':'♙','Partes de abajo':'♜','Vestidos':'♕','Abrigos':'♖','Calzado':'♢','Accesorios':'○'}[category]||'♧'}
