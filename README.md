@@ -111,6 +111,39 @@ gh pr create --base develop --fill
 El flujo completo —revisión, publicación a producción, hotfixes y convenciones— está en
 **[CONTRIBUTING.md](CONTRIBUTING.md)**.
 
+## Versión 0.0.2 y cuentas de prueba
+
+El archivo `VERSION` identifica la versión del código desplegado. La cabecera muestra
+«Versión 0.0.2» tanto en la portada como después de iniciar sesión, también en móvil.
+Para cambiar la versión en futuros despliegues, actualiza ese archivo en la rama correspondiente.
+
+Los slots `adrian` y `raul` disponen de estas cuentas ficticias; se inicia sesión con el correo:
+
+| Usuario | Correo | Armario en cada slot |
+|---------|--------|----------------------|
+| adri | adri@vestia.com | 60 prendas del catálogo Inditex |
+| raul | raul@vestia.com | 60 prendas del catálogo Inditex |
+
+Cada cuenta tiene su propio perfil de estilo, favoritos, contador de usos y armario privado.
+Las cuentas existen en ambos slots y sus datos son independientes entre bases de datos.
+Las prendas proceden de `storage/official_catalog.json`: conservan nombre, marca, referencia,
+color, talla, categoría, enlace oficial y precio de referencia, con su foto y miniatura WebP
+en `public/assets/catalog/`. Es una instantánea del catálogo incluido en el repositorio;
+los precios, tallas y disponibilidad no se actualizan en tiempo real.
+
+Las contraseñas se generan de forma aleatoria, se entregan por un canal privado y **no se
+documentan ni se guardan en Git**. La base de datos almacena únicamente sus hashes.
+`scripts/seed_test_users.php` recibe por entrada estándar un JSON con las claves `adri` y
+`raul` y contraseñas de al menos 16 caracteres. Valida las 120 imágenes antes de insertar,
+crea ambas cuentas y sus armarios en una transacción y omite las cuentas que ya existen,
+sin cambiar sus contraseñas ni borrar prendas o análisis. No uses `seed_demo.php` ni
+`import_official_catalog.php` para estas cuentas: esos scripts reemplazan datos existentes.
+
+La copia local actualizada está en `/home/saymon/php-projects/vestia`, basada en
+`adrianhruiz/vestia`. La antigua `/home/saymon/php-projects/armario` se conserva como histórico.
+El trabajo de esta versión está en `feature/version-002-test-wardrobes`, creada desde
+`develop`; ambos slots se despliegan desde esa rama. PRE y PROD conservan su flujo habitual.
+
 ## Estructura
 
 ```
