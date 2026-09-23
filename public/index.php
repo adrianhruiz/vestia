@@ -61,15 +61,17 @@ if (str_starts_with($path, '/api/')) {
         json_response(['ok'=>true]);
     }
     if ($path === '/api/profile' && $_SERVER['REQUEST_METHOD'] === 'POST') {
-        require_csrf(); $d = request_json(); $allowed = ['style','colors','avoid','sizes','budget','occasions']; $profile=[]; foreach($allowed as $key) $profile[$key]=mb_substr(trim((string)($d[$key]??'')),0,500);
-        $pdo->prepare('UPDATE users SET style_profile=? WHERE id=?')->execute([json_encode($profile,JSON_UNESCAPED_UNICODE),$uid]); json_response(['ok'=>true]);
+        require_csrf();
+        $pdo->prepare('UPDATE users SET style_profile=? WHERE id=?')->execute([json_encode(style_profile(request_json()),JSON_UNESCAPED_UNICODE),$uid]); json_response(['ok'=>true]);
     }
     if ($path === '/api/analyze' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         require_csrf(); $count = (int)$pdo->query("SELECT COUNT(*) FROM garments WHERE user_id={$uid}")->fetchColumn();
         if ($count < 2) json_response(['error'=>'Añade al menos dos prendas.'],422);
         $active = $pdo->prepare("SELECT id FROM jobs WHERE user_id=? AND status IN ('queued','processing')"); $active->execute([$uid]); if ($job=$active->fetch()) json_response(['job_id'=>(int)$job['id'],'existing'=>true]);
         $stmt=$pdo->prepare('SELECT style_profile FROM users WHERE id=?'); $stmt->execute([$uid]); $profile=json_decode($stmt->fetchColumn()?:'{}',true);
-        $input=array_merge($profile?:[],request_json()); $stmt=$pdo->prepare("INSERT INTO jobs(user_id,type,status,input_json,created_at) VALUES(?,'wardrobe_analysis','queued',?,?)"); $stmt->execute([$uid,json_encode($input,JSON_UNESCAPED_UNICODE),date(DATE_ATOM)]);
+        // The request body used to be array_merge'd in raw and stored, so anything a client
+        // posted became prompt we paid for. It gets the same six capped keys as the form.
+        $input=style_profile(request_json(),$profile?:[]); $stmt=$pdo->prepare("INSERT INTO jobs(user_id,type,status,input_json,created_at) VALUES(?,'wardrobe_analysis','queued',?,?)"); $stmt->execute([$uid,json_encode($input,JSON_UNESCAPED_UNICODE),date(DATE_ATOM)]);
         json_response(['job_id'=>(int)$pdo->lastInsertId()],202);
     }
     if (preg_match('#^/api/jobs/(\d+)/cancel$#',$path,$m) && $_SERVER['REQUEST_METHOD']==='POST') {
