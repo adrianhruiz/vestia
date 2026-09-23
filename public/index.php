@@ -67,11 +67,25 @@ if (str_starts_with($path, '/api/')) {
     if ($path === '/api/analyze' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         require_csrf(); $count = (int)$pdo->query("SELECT COUNT(*) FROM garments WHERE user_id={$uid}")->fetchColumn();
         if ($count < 2) json_response(['error'=>'Añade al menos dos prendas.'],422);
-        $active = $pdo->prepare("SELECT id FROM jobs WHERE user_id=? AND status IN ('queued','processing')"); $active->execute([$uid]); if ($job=$active->fetch()) json_response(['job_id'=>(int)$job['id'],'existing'=>true]);
+        $active = $pdo->prepare("SELECT id FROM jobs WHERE user_id=? AND type='wardrobe_analysis' AND status IN ('queued','processing')"); $active->execute([$uid]); if ($job=$active->fetch()) json_response(['job_id'=>(int)$job['id'],'existing'=>true]);
         $stmt=$pdo->prepare('SELECT style_profile FROM users WHERE id=?'); $stmt->execute([$uid]); $profile=json_decode($stmt->fetchColumn()?:'{}',true);
         // The request body used to be array_merge'd in raw and stored, so anything a client
         // posted became prompt we paid for. It gets the same six capped keys as the form.
         $input=style_profile(request_json(),$profile?:[]); $stmt=$pdo->prepare("INSERT INTO jobs(user_id,type,status,input_json,created_at) VALUES(?,'wardrobe_analysis','queued',?,?)"); $stmt->execute([$uid,json_encode($input,JSON_UNESCAPED_UNICODE),date(DATE_ATOM)]);
+        json_response(['job_id'=>(int)$pdo->lastInsertId()],202);
+    }
+    if (preg_match('#^/api/jobs/(\d+)/outfits/(\d+)/image$#',$path,$m) && $_SERVER['REQUEST_METHOD']==='POST') {
+        require_csrf(); $analysisId=(int)$m[1]; $index=(int)$m[2];
+        $stmt=$pdo->prepare("SELECT result_json FROM jobs WHERE id=? AND user_id=? AND type='wardrobe_analysis' AND status='completed'"); $stmt->execute([$analysisId,$uid]); $raw=$stmt->fetchColumn();
+        if ($raw===false) json_response(['error'=>'Análisis no encontrado.'],404);
+        $outfit=(json_decode((string)$raw,true)['outfits']??[])[$index]??null;
+        if (!is_array($outfit)) json_response(['error'=>'Ese look no existe.'],404);
+        if (!empty($outfit['image_url'])) json_response(['image_url'=>$outfit['image_url'],'ready'=>true]);
+        // Pressing twice must not buy the same picture twice.
+        $payload=json_encode(['analysis_job_id'=>$analysisId,'outfit_index'=>$index]);
+        $stmt=$pdo->prepare("SELECT id FROM jobs WHERE user_id=? AND type='outfit_image' AND status IN ('queued','processing') AND input_json=?"); $stmt->execute([$uid,$payload]);
+        if ($existing=$stmt->fetchColumn()) json_response(['job_id'=>(int)$existing,'existing'=>true],202);
+        $pdo->prepare("INSERT INTO jobs(user_id,type,status,input_json,created_at) VALUES(?,'outfit_image','queued',?,?)")->execute([$uid,$payload,date(DATE_ATOM)]);
         json_response(['job_id'=>(int)$pdo->lastInsertId()],202);
     }
     if (preg_match('#^/api/jobs/(\d+)/cancel$#',$path,$m) && $_SERVER['REQUEST_METHOD']==='POST') {
@@ -92,7 +106,7 @@ if (str_starts_with($path, '/api/')) {
     if ($path === '/api/jobs' && $_SERVER['REQUEST_METHOD'] === 'GET') {
         // The list is metadata only. It used to carry result_json for all ten analyses when
         // the only one ever rendered is the newest completed, so that one travels apart.
-        $stmt=$pdo->prepare('SELECT id,status,progress,phase,error,created_at,finished_at FROM jobs WHERE user_id=? ORDER BY id DESC LIMIT 10'); $stmt->execute([$uid]); $jobs=$stmt->fetchAll();
+        $stmt=$pdo->prepare("SELECT id,status,progress,phase,error,created_at,finished_at FROM jobs WHERE user_id=? AND type='wardrobe_analysis' ORDER BY id DESC LIMIT 10"); $stmt->execute([$uid]); $jobs=$stmt->fetchAll();
         $latest=null; foreach($jobs as $j) if($j['status']==='completed'){$latest=(int)$j['id']; break;}
         $result=null;
         if($latest){ $stmt=$pdo->prepare('SELECT result_json FROM jobs WHERE id=? AND user_id=?'); $stmt->execute([$latest,$uid]); $raw=$stmt->fetchColumn(); $result=$raw?json_decode($raw,true):null; }
