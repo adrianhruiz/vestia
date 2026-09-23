@@ -16,9 +16,13 @@ final class JobCancelled extends RuntimeException {}
 function run_wardrobe_analysis(PDO $pdo, OpenAI $ai, array $job, callable $announce, callable $stopIfCancelled): array {
     $garments = analysis_garments($pdo, (int) $job['user_id']);
     if (count($garments) < 2) throw new RuntimeException('Añade al menos dos prendas antes de analizar.');
+    $input = json_decode($job['input_json'], true) ?: [];
+    // Jobs queued before the shopping flag existed stored the profile flat and always searched.
+    $preferences = is_array($input['preferences'] ?? null) ? $input['preferences'] : $input;
+    $withShopping = (bool) ($input['shopping'] ?? true);
     $stopIfCancelled();
-    $announce(count($garments) . ' prendas leídas · buscando combinaciones', 30);
-    $result = $ai->analyze($garments, json_decode($job['input_json'], true) ?: []);
+    $announce(count($garments) . ' prendas leídas · ' . ($withShopping ? 'buscando combinaciones y compras' : 'buscando combinaciones'), 30);
+    $result = $ai->analyze($garments, $preferences, $withShopping);
     $stopIfCancelled();
     return $result;
 }
