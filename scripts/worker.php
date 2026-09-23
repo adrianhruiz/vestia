@@ -101,6 +101,9 @@ do {
         load_env(APP_ROOT . '/.env');
         $key = env('OPENAI_API_KEY', '');
         if ($key === '') throw new RuntimeException('Configura OPENAI_API_KEY en .env.');
+        if (daily_job_ceiling_reached($pdo, (int) $job['id'])) {
+            throw new RuntimeException('Hoy se ha alcanzado el tope de peticiones a la IA de este entorno. Vuelve a intentarlo mañana.');
+        }
         $ai = new OpenAI($key);
         $result = $job['type'] === 'outfit_image'
             ? run_outfit_image($pdo, $ai, $job, $announce, $stopIfCancelled)
