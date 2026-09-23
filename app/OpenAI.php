@@ -53,7 +53,7 @@ final class OpenAI {
     }
 
     public function outfitImage(array $outfit, array $garments): ?string {
-        $prompt = 'Fotografía editorial vertical de un outfit completo presentado como flat lay limpio, sin modelo, fondo neutro cálido. Sin logos ni texto. Conjunto: ' . json_encode(['outfit' => $outfit, 'garments' => $garments], JSON_UNESCAPED_UNICODE);
+        $prompt = 'Fotografía editorial vertical de un outfit completo presentado como flat lay limpio, sin modelo, fondo neutro cálido. Sin logos ni texto. Conjunto: ' . json_encode($this->outfitScene($outfit, $garments), JSON_UNESCAPED_UNICODE);
         $payload = [
             'model' => env('OPENAI_MODEL', 'gpt-5.5'), 'input' => $prompt,
             'tools' => [['type' => 'image_generation', 'model' => env('OPENAI_IMAGE_MODEL', 'gpt-image-2.5-flare'), 'size' => '1024x1536', 'quality' => 'medium']],
@@ -64,6 +64,34 @@ final class OpenAI {
             if (($item['type'] ?? '') === 'image_generation_call' && !empty($item['result'])) return $item['result'];
         }
         return null;
+    }
+
+    /**
+     * What drawing this look actually needs. The caller hands over the whole wardrobe
+     * because that is what it has, but only the pieces in this outfit reach the prompt —
+     * before, the full garment list was serialised into every image call, so a five-outfit
+     * analysis sent it six times over. The reasoning and the shopping links go too: they
+     * are for the person reading the card, not for the picture.
+     */
+    private function outfitScene(array $outfit, array $garments): array {
+        $wanted = array_flip(array_map('intval', $outfit['garment_ids'] ?? []));
+        $pieces = [];
+        foreach ($garments as $garment) {
+            if (!isset($wanted[(int) ($garment['id'] ?? 0)])) continue;
+            $pieces[] = array_filter([
+                'name' => $garment['name'] ?? null,
+                'category' => $garment['category'] ?? null,
+                'color' => $garment['color'] ?? null,
+                'season' => $garment['season'] ?? null,
+            ], static fn($value): bool => $value !== null && $value !== '');
+        }
+        return array_filter([
+            'name' => $outfit['name'] ?? null,
+            'occasion' => $outfit['occasion'] ?? null,
+            'garments' => $pieces,
+            // The look is only complete with the pieces the wardrobe is missing.
+            'complementos' => array_values(array_filter((array) ($outfit['missing_items'] ?? []), 'is_string')),
+        ], static fn($value): bool => $value !== null && $value !== '' && $value !== []);
     }
 
     private function request(string $path, array $payload, int $timeout = 120): array {
