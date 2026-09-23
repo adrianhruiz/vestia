@@ -50,3 +50,45 @@ function analysis_fingerprint(array $garments, array $input): string {
         'prompt' => ANALYSIS_PROMPT_VERSION,
     ], JSON_UNESCAPED_UNICODE));
 }
+
+/** How many analyses an ordinary account may start per hour. */
+const ANALYSES_PER_HOUR = 2;
+
+/**
+ * The analyses this account has spent in the last hour, newest first.
+ *
+ * Counted in PHP rather than in SQL on purpose. created_at is an ISO-8601 string with a
+ * local offset, so a string comparison silently reverses order across the two days a year
+ * the clocks change; DateTimeImmutable reads the offset and gets it right. Reading the last
+ * twenty rows costs nothing, and the limit itself keeps the window far below that.
+ *
+ * Failed runs are not counted: the person got nothing out of them. The global daily ceiling
+ * is what stops a failure loop from draining the key.
+ */
+function recent_analyses(PDO $pdo, int $userId): array {
+    $stmt = $pdo->prepare("SELECT created_at FROM jobs WHERE user_id=? AND type='wardrobe_analysis' AND status<>'failed' ORDER BY id DESC LIMIT 20");
+    $stmt->execute([$userId]);
+    $since = new DateTimeImmutable('-1 hour');
+    $recent = [];
+    foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $value) {
+        try { $at = new DateTimeImmutable((string) $value); } catch (Exception) { continue; }
+        if ($at >= $since) $recent[] = $at;
+    }
+    return $recent;
+}
+
+/** Test accounts run analyses back to back by design, so the limit does not apply to them. */
+function analysis_limit_exempt(array $user): bool {
+    if ((int) ($user['is_test'] ?? 0) === 1) return true;
+    $exempt = array_filter(array_map('trim', explode(',', (string) env('RATE_LIMIT_EXEMPT_EMAILS', ''))));
+    return in_array(strtolower((string) ($user['email'] ?? '')), array_map('strtolower', $exempt), true);
+}
+
+/** Seconds until this account may analyse again, or null when it may right now. */
+function analysis_retry_after(PDO $pdo, array $user): ?int {
+    if (analysis_limit_exempt($user)) return null;
+    $recent = recent_analyses($pdo, (int) $user['id']);
+    if (count($recent) < ANALYSES_PER_HOUR) return null;
+    // The oldest one in the window is the one whose slot frees up first.
+    return max(1, end($recent)->getTimestamp() + 3600 - time());
+}

@@ -22,11 +22,11 @@ $profile = json_encode([
 ], JSON_UNESCAPED_UNICODE);
 
 if (!$userId) {
-    $stmt = $pdo->prepare('INSERT INTO users(name,email,password_hash,style_profile,created_at) VALUES(?,?,?,?,?)');
+    $stmt = $pdo->prepare('INSERT INTO users(name,email,password_hash,style_profile,is_test,created_at) VALUES(?,?,?,?,1,?)');
     $stmt->execute(['Lucía Demo', $email, password_hash($password, PASSWORD_DEFAULT), $profile, date(DATE_ATOM)]);
     $userId = (int)$pdo->lastInsertId();
 } else {
-    $pdo->prepare('UPDATE users SET name=?,password_hash=?,style_profile=? WHERE id=?')
+    $pdo->prepare('UPDATE users SET name=?,password_hash=?,style_profile=?,is_test=1 WHERE id=?')
         ->execute(['Lucía Demo', password_hash($password, PASSWORD_DEFAULT), $profile, $userId]);
     $pdo->prepare('DELETE FROM garments WHERE user_id=?')->execute([$userId]);
 }
