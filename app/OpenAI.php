@@ -4,7 +4,7 @@ declare(strict_types=1);
 final class OpenAI {
     public function __construct(private string $key) {}
 
-    public function analyze(array $garments, array $preferences): array {
+    public function analyze(array $garments, array $preferences, bool $withShopping = true): array {
         $schema = [
             'type' => 'object', 'additionalProperties' => false,
             'required' => ['summary','palette','gaps','outfits'],
@@ -32,18 +32,24 @@ final class OpenAI {
                 ]]
             ]
         ];
+        $shoppingRules = 'Solo cuando falte una pieza, busca productos disponibles en webs oficiales de Zara, Massimo Dutti, Bershka, Pull&Bear, Stradivarius, Oysho o Lefties. No inventes disponibilidad, precio ni URL: si no puedes verificarlo, usa la página de búsqueda oficial y dilo en price_note.';
+        $wardrobeOnly = 'Trabaja únicamente con el armario real: no propongas compras y deja shopping vacío en todos los outfits. Sigue indicando en missing_items lo que le falte al armario.';
         $payload = [
             'model' => env('OPENAI_MODEL', 'gpt-5.5'),
-            'instructions' => 'Eres un estilista personal experto en tendencias actuales en España. Usa primero el armario real. Solo cuando falte una pieza, busca productos disponibles en webs oficiales de Zara, Massimo Dutti, Bershka, Pull&Bear, Stradivarius, Oysho o Lefties. No inventes disponibilidad, precio ni URL: si no puedes verificarlo, usa la página de búsqueda oficial y dilo en price_note. Devuelve español claro.',
+            'instructions' => 'Eres un estilista personal experto en tendencias actuales en España. Usa primero el armario real. ' . ($withShopping ? $shoppingRules : $wardrobeOnly) . ' Devuelve español claro.',
             'input' => json_encode(['preferences' => $preferences, 'garments' => $garments], JSON_UNESCAPED_UNICODE),
-            'tools' => [['type' => 'web_search', 'filters' => ['allowed_domains' => ['zara.com','massimodutti.com','bershka.com','pullandbear.com','stradivarius.com','oysho.com','lefties.com']]]],
-            'include' => ['web_search_call.action.sources'],
             'text' => ['format' => ['type' => 'json_schema', 'name' => 'wardrobe_analysis', 'strict' => true, 'schema' => $schema]],
             // The schema tops out at five outfits with three shopping links each; 5000 was
             // paying for headroom nothing could use.
             'max_output_tokens' => 2500,
             'store' => false,
         ];
+        // The search is billed per call and its results land in the input tokens, so it only
+        // runs when the person actually asked for things to buy.
+        if ($withShopping) {
+            $payload['tools'] = [['type' => 'web_search', 'filters' => ['allowed_domains' => ['zara.com','massimodutti.com','bershka.com','pullandbear.com','stradivarius.com','oysho.com','lefties.com']]]];
+            $payload['include'] = ['web_search_call.action.sources'];
+        }
         $response = $this->request('/responses', $payload);
         $text = $this->outputText($response);
         $result = json_decode($text, true);

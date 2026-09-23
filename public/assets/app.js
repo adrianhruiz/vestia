@@ -25,7 +25,7 @@ if(document.body.dataset.auth==='1'){
  // The unfiltered wardrobe ships inside the page, so the first paint costs no request.
  Array.isArray(window.APP.garments)?renderGarments(window.APP.garments):loadGarments();
  $('#profile-form').addEventListener('submit',async e=>{e.preventDefault();await api('/api/profile',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.fromEntries(new FormData(e.currentTarget)))});toast('Preferencias guardadas')});
- const startAnalysis=async()=>{try{const d=await api('/api/analyze',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});activeJob=d.job_id;showMini(3);switchView('outfits');startPolling()}catch(x){toast(x.message)}};$('#analyze').onclick=startAnalysis;$('#analyze-top').onclick=startAnalysis;
+ const startAnalysis=async()=>{try{const d=await api('/api/analyze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({shopping:$('#want-shopping')?.checked===true})});activeJob=d.job_id;showMini(3);switchView('outfits');startPolling()}catch(x){toast(x.message)}};$('#analyze').onclick=startAnalysis;$('#analyze-top').onclick=startAnalysis;
  function showMini(p,phase){$('#job-mini').hidden=false;$('.progress i',$('#job-mini')).style.width=p+'%';if(phase)$('#job-mini small').textContent=phase}
  // One chain at a time. Every entry point used to call pollJob() directly, and pollJob
  // re-armed itself without clearing the previous timer, so opening Outfits twice left two
