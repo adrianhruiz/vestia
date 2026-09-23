@@ -92,3 +92,22 @@ function analysis_retry_after(PDO $pdo, array $user): ?int {
     // The oldest one in the window is the one whose slot frees up first.
     return max(1, end($recent)->getTimestamp() + 3600 - time());
 }
+
+/**
+ * Whether the installation has already spent its allowance of model calls today.
+ *
+ * The per-account hourly limit stops one person hammering the button; this is the backstop
+ * for everything it does not cover — a worker stuck in a retry loop, a bug that queues jobs,
+ * an account someone is abusing. Unset or 0 means no ceiling, which is the default so a
+ * fresh checkout behaves as before.
+ *
+ * Matching started_at on a date prefix is safe: the column is a local ISO-8601 timestamp, so
+ * the first ten characters are the local calendar day regardless of the offset.
+ */
+function daily_job_ceiling_reached(PDO $pdo, int $currentJobId): bool {
+    $ceiling = (int) env('OPENAI_MAX_JOBS_PER_DAY', '0');
+    if ($ceiling <= 0) return false;
+    $stmt = $pdo->prepare("SELECT COUNT(*) FROM jobs WHERE started_at LIKE ? AND status<>'failed' AND id<>?");
+    $stmt->execute([date('Y-m-d') . '%', $currentJobId]);
+    return (int) $stmt->fetchColumn() >= $ceiling;
+}
