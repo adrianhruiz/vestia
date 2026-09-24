@@ -1,0 +1,11 @@
+[Unit]
+Description=Catalogos Inditex el dia 1 de cada mes a las 04:00 hora de Espana
+
+[Timer]
+OnCalendar=*-*-01 04:00:00 Europe/Madrid
+Persistent=true
+RandomizedDelaySec=10m
+Unit=inditex-catalog.service
+
+[Install]
+WantedBy=timers.target

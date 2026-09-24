@@ -1,0 +1,8 @@
+[Unit]
+Description=Refresh the private catalog viewer every five minutes
+[Timer]
+OnBootSec=1min
+OnUnitInactiveSec=5min
+Unit=inditex-viewer-index.service
+[Install]
+WantedBy=timers.target

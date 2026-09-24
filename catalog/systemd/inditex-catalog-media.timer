@@ -1,0 +1,8 @@
+[Unit]
+Description=Process newly queued catalog images
+[Timer]
+OnBootSec=2min
+OnUnitInactiveSec=5min
+Unit=inditex-catalog-media.service
+[Install]
+WantedBy=timers.target

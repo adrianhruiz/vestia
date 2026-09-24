@@ -1,0 +1,25 @@
+[Unit]
+Description=Monthly public catalogs of all eight Inditex Spain stores
+Wants=network-online.target inditex-catalog-media.service
+After=network-online.target
+StartLimitIntervalSec=1d
+StartLimitBurst=3
+[Service]
+Type=oneshot
+User=catalog-inditex
+Group=catalog-inditex
+WorkingDirectory=/opt/inditex-catalog
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/opt/inditex-catalog/.venv/bin/python /opt/inditex-catalog/harvest.py harvest
+TimeoutStartSec=7d
+Restart=on-failure
+RestartSec=30min
+UMask=0022
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/inditex-catalog
+MemoryMax=1536M
+CPUQuota=80%
+Nice=10
