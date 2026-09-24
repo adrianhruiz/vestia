@@ -1,0 +1,110 @@
+{
+  "market": "ES",
+  "currency": "EUR",
+  "request_delay_seconds": 3,
+  "max_sitemaps": 500,
+  "max_pages_per_brand": 100000,
+  "min_free_gb": 15,
+  "image_hosts": [
+    "static.zara.net",
+    "static.zara.com",
+    "static.e-stradivarius.net",
+    "static.bershka.net",
+    "static.pullandbear.net",
+    "static.massimodutti.net",
+    "static.oysho.net",
+    "static.zarahome.com",
+    "static.lefties.com",
+    "static.inditex.com"
+  ],
+  "brands": [
+    {
+      "id": "zara",
+      "home": "https://www.zara.com/es/es/",
+      "sitemap_hosts": [
+        "www.zara.com"
+      ],
+      "sitemaps": [
+        "https://www.zara.com/sitemap.xml"
+      ],
+      "adapter": "jsonld_unvalidated"
+    },
+    {
+      "id": "pullandbear",
+      "home": "https://www.pullandbear.com/es/",
+      "sitemap_hosts": [
+        "www.pullandbear.com"
+      ],
+      "sitemaps": [
+        "https://www.pullandbear.com/sitemap.xml"
+      ],
+      "adapter": "jsonld_unvalidated"
+    },
+    {
+      "id": "massimodutti",
+      "home": "https://www.massimodutti.com/es/",
+      "sitemap_hosts": [
+        "www.massimodutti.com"
+      ],
+      "sitemaps": [
+        "https://www.massimodutti.com/sitemap.xml"
+      ],
+      "adapter": "jsonld_unvalidated"
+    },
+    {
+      "id": "bershka",
+      "home": "https://www.bershka.com/es/",
+      "sitemap_hosts": [
+        "www.bershka.com"
+      ],
+      "sitemaps": [
+        "https://www.bershka.com/sitemap.xml"
+      ],
+      "adapter": "jsonld_unvalidated"
+    },
+    {
+      "id": "stradivarius",
+      "home": "https://www.stradivarius.com/es/",
+      "sitemap_hosts": [
+        "www.stradivarius.com"
+      ],
+      "sitemaps": [
+        "https://www.stradivarius.com/sitemap.xml"
+      ],
+      "adapter": "jsonld_unvalidated"
+    },
+    {
+      "id": "oysho",
+      "home": "https://www.oysho.com/es/",
+      "sitemap_hosts": [
+        "www.oysho.com"
+      ],
+      "sitemaps": [
+        "https://www.oysho.com/sitemap.xml"
+      ],
+      "adapter": "jsonld_unvalidated"
+    },
+    {
+      "id": "zarahome",
+      "home": "https://www.zarahome.com/es/",
+      "sitemap_hosts": [
+        "www.zarahome.com"
+      ],
+      "sitemaps": [
+        "https://www.zarahome.com/sitemap.xml"
+      ],
+      "adapter": "jsonld_unvalidated"
+    },
+    {
+      "id": "lefties",
+      "home": "https://www.lefties.com/es/",
+      "sitemap_hosts": [
+        "www.lefties.com"
+      ],
+      "sitemaps": [
+        "https://www.lefties.com/sitemap.xml"
+      ],
+      "adapter": "jsonld_unvalidated"
+    }
+  ]
+}

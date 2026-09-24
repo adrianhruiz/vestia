@@ -1,0 +1,18 @@
+[Unit]
+Description=Refresh private Vestia catalog index and thumbnails
+After=local-fs.target
+[Service]
+Type=oneshot
+User=catalog-inditex
+Group=www-data
+ExecStart=/opt/inditex-catalog/.venv/bin/python /opt/inditex-catalog/build_viewer.py
+UMask=0027
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/inditex-catalog/viewer
+TimeoutStartSec=15min
+MemoryMax=768M
+CPUQuota=50%
+Nice=15

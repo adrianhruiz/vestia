@@ -1,0 +1,1 @@
+www-data ALL=(root) NOPASSWD: /usr/local/sbin/vestia-catalog-control status, /usr/local/sbin/vestia-catalog-control start
