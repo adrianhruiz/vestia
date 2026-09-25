@@ -2,6 +2,7 @@
 declare(strict_types=1);
 require dirname(__DIR__) . '/app/bootstrap.php';
 require dirname(__DIR__) . '/app/Catalog.php';
+require dirname(__DIR__) . '/app/Email.php';
 require dirname(__DIR__) . '/app/Images.php';
 require dirname(__DIR__) . '/app/Analysis.php';
 require dirname(__DIR__) . '/app/Share.php';
@@ -16,7 +17,16 @@ if (str_starts_with($path, '/api/')) {
         // The shared look this person came in through, if any. It is read from the session,
         // which only render_share_page() writes, never from the request body.
         $ref = isset($_SESSION['ref_share']) && preg_match('/^[a-f0-9]{32}$/', (string)$_SESSION['ref_share']) ? (string)$_SESSION['ref_share'] : null;
-        try { $stmt = $pdo->prepare('INSERT INTO users(name,email,password_hash,style_profile,signup_share_token,created_at) VALUES(?,?,?,?,?,?)'); $stmt->execute([$name,$email,password_hash($password,PASSWORD_DEFAULT),'{}',$ref,date(DATE_ATOM)]); }
+        // Asked before the INSERT so the answer can say which of the two it is: the same
+        // address again, or a new spelling of an inbox that already has an account. The
+        // UNIQUE on email_canonical is still what decides it -- this read can lose a race
+        // with a second registration and the index cannot.
+        $canonical = email_canonical($email);
+        $stmt = $pdo->prepare('SELECT email FROM users WHERE email_canonical=? OR email=? LIMIT 1'); $stmt->execute([$canonical, $email]);
+        if (($taken = $stmt->fetchColumn()) !== false) json_response(['error' => $taken === $email
+            ? 'Ese email ya está registrado.'
+            : 'Ya hay una cuenta con ese buzón. Las direcciones con +etiqueta o con puntos llegan al mismo sitio: entra con la que usaste al registrarte.'], 409);
+        try { $stmt = $pdo->prepare('INSERT INTO users(name,email,email_canonical,password_hash,style_profile,signup_share_token,created_at) VALUES(?,?,?,?,?,?,?)'); $stmt->execute([$name,$email,$canonical,password_hash($password,PASSWORD_DEFAULT),'{}',$ref,date(DATE_ATOM)]); }
         catch (PDOException $e) {
             if (($e->errorInfo[1] ?? 0) === 1062) json_response(['error' => 'Ese email ya está registrado.'], 409);
             error_log('register failed: ' . $e->getMessage());

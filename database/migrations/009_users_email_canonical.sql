@@ -1,0 +1,21 @@
+-- One account per mailbox, not one account per string.
+--
+-- users.email is UNIQUE, which only stops the exact same address being registered twice.
+-- The local part of an address means whatever the receiving server says it means, so
+-- adri@gmail.com, adri+vestia@gmail.com and a.d.r.i@gmail.com are three rows here and one
+-- inbox there. email_canonical is the reduced form, and its UNIQUE is what actually holds
+-- the per-account limits up.
+--
+-- The address as the person typed it stays in email: that is what a verification mail would
+-- have to be sent to, and what they expect to read back on screen.
+--
+-- Nullable, and filled by scripts/backfill_email_canonical.php rather than here. Reducing an
+-- address is PHP (see app/Email.php); rewriting that logic in SQL would leave two versions
+-- to disagree with each other, which is the exact failure this column exists to prevent.
+-- MySQL and MariaDB allow any number of NULLs in a UNIQUE index, so rows registered before
+-- this migration sit here without colliding until the backfill reaches them.
+--
+-- ADD COLUMN / ADD UNIQUE KEY with IF NOT EXISTS is MariaDB syntax, which is what every VPS
+-- environment runs. MySQL 8 rejects it: drop the IF NOT EXISTS there and run the file once.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS email_canonical VARCHAR(255) NULL AFTER email;
+ALTER TABLE users ADD UNIQUE KEY IF NOT EXISTS users_email_canonical(email_canonical);
