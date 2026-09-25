@@ -3,6 +3,7 @@ declare(strict_types=1);
 require dirname(__DIR__) . '/app/bootstrap.php';
 require dirname(__DIR__) . '/app/Catalog.php';
 require dirname(__DIR__) . '/app/Images.php';
+require dirname(__DIR__) . '/app/SignupLimit.php';
 require dirname(__DIR__) . '/app/Analysis.php';
 require dirname(__DIR__) . '/app/Share.php';
 
@@ -13,6 +14,12 @@ if (str_starts_with($path, '/api/')) {
         require_csrf(); $d = request_json();
         $name = trim((string)($d['name'] ?? '')); $email = strtolower(trim((string)($d['email'] ?? ''))); $password = (string)($d['password'] ?? '');
         if (mb_strlen($name) < 2 || !filter_var($email, FILTER_VALIDATE_EMAIL) || strlen($password) < 10) json_response(['error' => 'Revisa nombre, email y contraseña (mínimo 10 caracteres).'], 422);
+        // Checked after the fields are known good, so a malformed request cannot spend
+        // somebody else's allowance, and before the INSERT, so a refusal costs no row.
+        $ipHash = signup_ip_hash(signup_client_ip());
+        $emailDomain = substr($email, strrpos($email, '@') + 1);
+        $wait = signup_retry_after($pdo, $ipHash, $emailDomain);
+        if ($wait !== null) json_response(['error' => 'Se han creado demasiadas cuentas desde aquí. Vuelve a intentarlo a las ' . date('H:i', time() + $wait) . '.', 'retry_after' => $wait], 429);
         // The shared look this person came in through, if any. It is read from the session,
         // which only render_share_page() writes, never from the request body.
         $ref = isset($_SESSION['ref_share']) && preg_match('/^[a-f0-9]{32}$/', (string)$_SESSION['ref_share']) ? (string)$_SESSION['ref_share'] : null;
@@ -22,6 +29,8 @@ if (str_starts_with($path, '/api/')) {
             error_log('register failed: ' . $e->getMessage());
             json_response(['error' => 'No se pudo completar el registro. Inténtalo de nuevo.'], 500);
         }
+        // Only now: what the limit counts is accounts that exist, not forms that bounced.
+        record_signup($pdo, $ipHash, $emailDomain);
         session_regenerate_id(true); $_SESSION['user_id'] = (int)$pdo->lastInsertId(); json_response(['ok' => true]);
     }
     if ($path === '/api/login' && $_SERVER['REQUEST_METHOD'] === 'POST') {
