@@ -3,6 +3,7 @@ declare(strict_types=1);
 require dirname(__DIR__) . '/app/bootstrap.php';
 require dirname(__DIR__) . '/app/Catalog.php';
 require dirname(__DIR__) . '/app/Email.php';
+require dirname(__DIR__) . '/app/EmailValidation.php';
 require dirname(__DIR__) . '/app/Images.php';
 require dirname(__DIR__) . '/app/SignupLimit.php';
 require dirname(__DIR__) . '/app/Analysis.php';
@@ -18,9 +19,21 @@ if (str_starts_with($path, '/api/')) {
         // Checked after the fields are known good, so a malformed request cannot spend
         // somebody else's allowance, and before the INSERT, so a refusal costs no row.
         $ipHash = signup_ip_hash(signup_client_ip());
-        $emailDomain = substr($email, strrpos($email, '@') + 1);
+        $emailDomain = email_domain_of($email) ?? '';
         $wait = signup_retry_after($pdo, $ipHash, $emailDomain);
         if ($wait !== null) json_response(['error' => 'Se han creado demasiadas cuentas desde aquí. Vuelve a intentarlo a las ' . date('H:i', time() + $wait) . '.', 'retry_after' => $wait], 429);
+        // After the limit above, which is one indexed read: an origin that is already
+        // blocked never gets as far as the DNS lookup in here, the only part of registering
+        // that waits on the network.
+        //
+        // Said apart from the field check further up on purpose: "revisa el email" is no
+        // help to someone whose address is written perfectly and whose provider we will not
+        // take.
+        if (($rejected = email_rejection($email)) !== null) json_response(['error' => [
+            'syntax' => 'Esa dirección de correo no es válida.',
+            'domain' => 'El dominio de ese correo no recibe mensajes. Revisa si hay una errata.',
+            'disposable' => 'No admitimos correos temporales. Usa una dirección permanente.',
+        ][$rejected]], 422);
         // The shared look this person came in through, if any. It is read from the session,
         // which only render_share_page() writes, never from the request body.
         $ref = isset($_SESSION['ref_share']) && preg_match('/^[a-f0-9]{32}$/', (string)$_SESSION['ref_share']) ? (string)$_SESSION['ref_share'] : null;
