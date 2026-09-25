@@ -1,0 +1,75 @@
+# Throwaway-mailbox providers. One domain per line, lowercase; a line starting with # is a
+# comment. A parent domain covers its subdomains, so mailinator.com also blocks
+# anything.mailinator.com -- several of these hand out subdomains without limit.
+#
+# This is a curated starting list of the providers people actually reach for, not the
+# complete set: there are thousands and new ones appear weekly. Refresh it from a public
+# list (github.com/disposable-email-domains/disposable-email-domains is the usual one) when
+# it stops catching things. Loaded by email_domain_disposable() in app/EmailValidation.php.
+
+10minutemail.com
+10minutemail.net
+20minutemail.com
+anonbox.net
+burnermail.io
+correotemporal.org
+discard.email
+dispostable.com
+dropmail.me
+e4ward.com
+emailfake.com
+emailondeck.com
+emailtemporanea.net
+fakeinbox.com
+fakemail.net
+generator.email
+getairmail.com
+getnada.com
+grr.la
+guerrillamail.biz
+guerrillamail.com
+guerrillamail.de
+guerrillamail.info
+guerrillamail.net
+guerrillamail.org
+harakirimail.com
+inboxkitten.com
+incognitomail.com
+jetable.org
+luxusmail.org
+mail-temporaire.fr
+mail7.io
+mailcatch.com
+maildrop.cc
+mailexpire.com
+mailinator.com
+mailnesia.com
+mailsac.com
+mailtemp.net
+minuteinbox.com
+mintemail.com
+moakt.com
+mohmal.com
+mytrashmail.com
+nada.email
+sharklasers.com
+spam4.me
+spambog.com
+spambox.us
+spamex.com
+spamgourmet.com
+temp-mail.io
+temp-mail.org
+tempail.com
+tempmail.com
+tempmailo.com
+tempr.email
+throwawaymail.com
+tmpmail.net
+tmpmail.org
+trash-mail.com
+trashmail.com
+trashmail.de
+yopmail.com
+yopmail.fr
+yopmail.net
