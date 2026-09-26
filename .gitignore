@@ -10,6 +10,8 @@
 !/storage/outfits/.gitkeep
 /storage/shares/*
 !/storage/shares/.gitkeep
+/storage/style/*
+!/storage/style/.gitkeep
 /storage/logs/*
 !/storage/logs/.gitkeep
 /storage/*.sqlite*

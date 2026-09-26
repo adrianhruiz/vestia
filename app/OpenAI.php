@@ -58,6 +58,65 @@ final class OpenAI {
         return $result;
     }
 
+    /**
+     * What this person wears, read from their photos and from whatever they chose to add.
+     *
+     * The photos may be of them or of looks they saved: the screen asks for either, and the
+     * difference does not change the question. Both are what they want to be wearing.
+     *
+     * Three things the schema and the instructions are deliberately strict about.
+     *
+     * Every field may come back empty. A photo cannot show a size or a budget, and a model
+     * asked for one anyway produces "M" and "hasta 120 €" that the person then reads as
+     * something we knew about them. Those two are not in the schema at all; the rest are
+     * allowed to be the empty string.
+     *
+     * `avoid` is filled from the note or not at all. A print not appearing in three photos
+     * is not evidence that anybody dislikes it, and this is the field that decides what the
+     * stylist will never propose again.
+     *
+     * And nothing describes the person. Age, body, weight, gender, origin: a photograph
+     * invites all of it, it is not what was asked for, and reading a machine's opinion of
+     * your body is not what anybody signed up for. The subject is the clothes.
+     */
+    public function readStyle(array $photos, string $note): array {
+        // Built from the list StyleReading.php accepts back, so what is asked for and what is
+        // kept are the same set by construction. strict mode wants every property required;
+        // "may be empty" is carried by the instructions, not by making a field optional.
+        $fields = array_merge(['summary'], STYLE_READING_KEYS);
+        $schema = [
+            'type' => 'object', 'additionalProperties' => false,
+            'required' => $fields,
+            'properties' => array_fill_keys($fields, ['type' => 'string']),
+        ];
+        $text = 'Lee mi estilo a partir de ' . (count($photos) === 1 ? 'esta foto' : 'estas ' . count($photos) . ' fotos') . '.';
+        if ($note !== '') $text .= ' Además quiero contarte esto: ' . $note;
+
+        $content = [['type' => 'input_text', 'text' => $text]];
+        foreach ($photos as $photo) {
+            $content[] = ['type' => 'input_image', 'image_url' => 'data:image/jpeg;base64,' . base64_encode((string) file_get_contents($photo))];
+        }
+        $payload = [
+            'model' => env('OPENAI_MODEL', 'gpt-5.5'),
+            'instructions' => 'Eres un estilista personal experto en tendencias actuales en España. '
+                . 'Mira las fotos y describe el estilo de quien te las envía, en segunda persona y en español claro. '
+                . 'Habla solo de ropa: prendas, cortes, tejidos, colores y cómo se combinan. '
+                . 'No describas a la persona ni el lugar: nada de edad, cuerpo, peso, género ni origen. '
+                . 'Deja vacío cualquier campo que no puedas deducir de lo que ves; inventarlo es peor que no decir nada. '
+                . 'Rellena avoid solo si la nota dice expresamente qué no quiere ponerse. '
+                . 'summary es una frase corta que resuma lo que has visto.',
+            'input' => [['role' => 'user', 'content' => $content]],
+            'text' => ['format' => ['type' => 'json_schema', 'name' => 'style_reading', 'strict' => true, 'schema' => $schema]],
+            // Five short fields. The wardrobe analysis needs 2500 because it writes five
+            // outfits; this one has never come near 800.
+            'max_output_tokens' => 800,
+            'store' => false,
+        ];
+        $result = json_decode($this->outputText($this->request('/responses', $payload)), true);
+        if (!is_array($result)) throw new RuntimeException('OpenAI no devolvió una lectura válida.');
+        return $result;
+    }
+
     public function outfitImage(array $outfit, array $garments): ?string {
         $prompt = 'Fotografía editorial vertical de un outfit completo presentado como flat lay limpio, sin modelo, fondo neutro cálido. Sin logos ni texto. Conjunto: ' . json_encode($this->outfitScene($outfit, $garments), JSON_UNESCAPED_UNICODE);
         $payload = [
