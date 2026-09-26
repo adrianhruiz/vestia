@@ -4,6 +4,7 @@ declare(strict_types=1);
 require dirname(__DIR__) . '/app/bootstrap.php';
 require APP_ROOT . '/app/OpenAI.php';
 require APP_ROOT . '/app/Analysis.php';
+require APP_ROOT . '/app/StyleReading.php';
 
 /** Thrown when the user asked to stop a run, so the catch below can tell it from a failure. */
 final class JobCancelled extends RuntimeException {}
@@ -74,14 +75,47 @@ function run_outfit_image(PDO $pdo, OpenAI $ai, array $job, callable $announce, 
     return ['image_url' => $url];
 }
 
+/**
+ * The style reading: show the stylist the photos, keep the verdict, destroy the photos.
+ *
+ * The deletion is in a finally on purpose. Photos of somebody's face are input, not
+ * something this app keeps, and the outcome of the call does not change that: a reading
+ * that failed leaves no more reason to hold them than one that worked. It costs a re-upload
+ * on the rare retry, which is twenty seconds, and it means there is no path through here
+ * that ends with the files still on disk.
+ */
+function run_style_reading(PDO $pdo, OpenAI $ai, array $job, callable $announce, callable $stopIfCancelled): array {
+    $input = json_decode($job['input_json'], true) ?: [];
+    $names = array_values(array_filter((array) ($input['photos'] ?? []), 'is_string'));
+    $photos = array_values(array_filter(array_map('style_photo_path', $names)));
+    // Everything that deletes them is deliberate, so an empty list means this job already
+    // ran, or its photos aged out waiting for a worker that was not running.
+    if (!$photos) throw new RuntimeException('Las fotos ya no están disponibles. Vuelve a subirlas.');
+
+    $stopIfCancelled();
+    $announce(count($photos) === 1 ? 'Mirando tu foto' : 'Mirando tus ' . count($photos) . ' fotos', 40);
+    try {
+        $answer = $ai->readStyle($photos, (string) ($input['note'] ?? ''));
+    } finally {
+        style_photos_delete($names);
+    }
+    $stopIfCancelled();
+    return style_reading_result($answer);
+}
+
+/** What the bar says before the job has done anything. Each type starts somewhere different. */
+function job_initial_phase(string $type): string {
+    return ['style_reading' => 'Abriendo tus fotos', 'outfit_image' => 'Preparando el lienzo'][$type] ?? 'Leyendo tu armario';
+}
+
 $once = in_array('--once', $argv, true);
 do {
     $pdo = db();
     $pdo->beginTransaction();
     $job = $pdo->query("SELECT * FROM jobs WHERE status='queued' ORDER BY id LIMIT 1")->fetch();
     if ($job) {
-        $stmt = $pdo->prepare("UPDATE jobs SET status='processing', progress=10, phase='Leyendo tu armario', started_at=:now WHERE id=:id AND status='queued'");
-        $stmt->execute(['now' => date(DATE_ATOM), 'id' => $job['id']]);
+        $stmt = $pdo->prepare("UPDATE jobs SET status='processing', progress=10, phase=:phase, started_at=:now WHERE id=:id AND status='queued'");
+        $stmt->execute(['phase' => job_initial_phase((string) $job['type']), 'now' => date(DATE_ATOM), 'id' => $job['id']]);
         if ($stmt->rowCount() !== 1) $job = false;
     }
     $pdo->commit();
@@ -105,9 +139,11 @@ do {
             throw new RuntimeException('Hoy se ha alcanzado el tope de peticiones a la IA de este entorno. Vuelve a intentarlo mañana.');
         }
         $ai = new OpenAI($key);
-        $result = $job['type'] === 'outfit_image'
-            ? run_outfit_image($pdo, $ai, $job, $announce, $stopIfCancelled)
-            : run_wardrobe_analysis($pdo, $ai, $job, $announce, $stopIfCancelled);
+        $result = match ($job['type']) {
+            'outfit_image' => run_outfit_image($pdo, $ai, $job, $announce, $stopIfCancelled),
+            'style_reading' => run_style_reading($pdo, $ai, $job, $announce, $stopIfCancelled),
+            default => run_wardrobe_analysis($pdo, $ai, $job, $announce, $stopIfCancelled),
+        };
         $pdo->prepare("UPDATE jobs SET status='completed', progress=100, phase=NULL, result_json=?, finished_at=? WHERE id=?")
             ->execute([json_encode($result, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), date(DATE_ATOM), $job['id']]);
     } catch (JobCancelled) {

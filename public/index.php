@@ -6,6 +6,7 @@ require dirname(__DIR__) . '/app/Email.php';
 require dirname(__DIR__) . '/app/EmailValidation.php';
 require dirname(__DIR__) . '/app/Images.php';
 require dirname(__DIR__) . '/app/SignupLimit.php';
+require dirname(__DIR__) . '/app/StyleReading.php';
 require dirname(__DIR__) . '/app/Analysis.php';
 require dirname(__DIR__) . '/app/Share.php';
 
@@ -101,6 +102,45 @@ if (str_starts_with($path, '/api/')) {
     if ($path === '/api/profile' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         require_csrf();
         $pdo->prepare('UPDATE users SET style_profile=? WHERE id=?')->execute([json_encode(style_profile(request_json()),JSON_UNESCAPED_UNICODE),$uid]); json_response(['ok'=>true]);
+    }
+    if ($path === '/api/style-reading' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+        require_csrf();
+        // Sent as photos[], so $_FILES arrives column by column rather than one entry per
+        // file. An empty slot is a slot nobody filled, not an error worth a message.
+        $uploads = [];
+        foreach ((array)($_FILES['photos']['tmp_name'] ?? []) as $i => $tmp) {
+            if ((int)($_FILES['photos']['error'][$i] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_NO_FILE) continue;
+            $uploads[] = ['tmp' => (string)$tmp, 'size' => (int)($_FILES['photos']['size'][$i] ?? 0), 'error' => (int)$_FILES['photos']['error'][$i]];
+        }
+        if (!$uploads) json_response(['error' => 'Añade al menos una foto para que el estilista pueda leer tu estilo.'], 422);
+        if (count($uploads) > STYLE_PHOTO_MAX_COUNT) json_response(['error' => 'Como mucho ' . STYLE_PHOTO_MAX_COUNT . ' fotos.'], 422);
+        // Pressing twice must not buy the same reading twice.
+        $active = $pdo->prepare("SELECT id FROM jobs WHERE user_id=? AND type='style_reading' AND status IN ('queued','processing')"); $active->execute([$uid]);
+        if ($job = $active->fetch()) json_response(['job_id' => (int)$job['id'], 'existing' => true], 202);
+        $stmt = $pdo->prepare('SELECT id,email,is_test FROM users WHERE id=?'); $stmt->execute([$uid]); $user = $stmt->fetch();
+        $wait = style_reading_retry_after($pdo, $user ?: []);
+        if ($wait !== null) json_response(['error' => 'Has usado tus ' . STYLE_READINGS_PER_DAY . ' lecturas de estilo de hoy. La siguiente estará disponible a las ' . date('H:i', time() + $wait) . '.', 'retry_after' => $wait], 429);
+        // Every photo is checked before any of them is written: half an upload stored is a
+        // directory to clean up and a reading of a style nobody described.
+        foreach ($uploads as $i => $upload) {
+            if ($upload['error'] !== UPLOAD_ERR_OK || $upload['size'] > STYLE_PHOTO_MAX_BYTES) json_response(['error' => 'Cada foto tiene que ocupar menos de 8 MB.'], 422);
+            if (!is_uploaded_file($upload['tmp'])) json_response(['error' => 'Esa foto no es válida.'], 422);
+            if (($uploads[$i]['mime'] = style_photo_format($upload['tmp'])) === null) json_response(['error' => 'Formato permitido: JPG, PNG o WebP.'], 422);
+        }
+        // Whatever the last attempt left behind goes now: an account never holds more photos
+        // than the reading it is asking for.
+        style_photos_delete(style_photos_of_user($uid));
+        $names = [];
+        try { foreach ($uploads as $upload) { $name = style_photo_name($uid); store_style_photo($upload['tmp'], (string)$upload['mime'], style_photo_dir(), $name); $names[] = $name; } }
+        catch (Throwable $e) {
+            style_photos_delete($names);
+            error_log('style photo failed: ' . $e->getMessage());
+            json_response(['error' => 'No se pudo procesar alguna de las fotos.'], 500);
+        }
+        style_photos_purge();
+        $stmt = $pdo->prepare("INSERT INTO jobs(user_id,type,status,input_json,created_at) VALUES(?,'style_reading','queued',?,?)");
+        $stmt->execute([$uid, json_encode(style_reading_input($names, (string)($_POST['note'] ?? '')), JSON_UNESCAPED_UNICODE), date(DATE_ATOM)]);
+        json_response(['job_id' => (int)$pdo->lastInsertId()], 202);
     }
     if ($path === '/api/analyze' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         require_csrf(); $count = (int)$pdo->query("SELECT COUNT(*) FROM garments WHERE user_id={$uid}")->fetchColumn();
