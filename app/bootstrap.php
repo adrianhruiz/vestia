@@ -111,6 +111,17 @@ function style_profile(array ...$sources): array {
     return $profile;
 }
 
+/**
+ * The profile after a form that is only about part of it.
+ *
+ * A key the request mentions is taken from the request, empty included, so a field can still
+ * be cleared by emptying its box. A key it does not mention at all keeps what it had: the
+ * welcome screen asks about four of the six and must not wipe the two it never showed.
+ */
+function style_profile_update(array $body, array $stored): array {
+    return style_profile($body) + style_profile(array_diff_key($stored, $body));
+}
+
 function e(?string $value): string { return htmlspecialchars($value ?? '', ENT_QUOTES, 'UTF-8'); }
 
 /**
