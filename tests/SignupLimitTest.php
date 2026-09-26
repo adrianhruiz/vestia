@@ -238,3 +238,25 @@ test('lo que escribe es lo que el límite luego lee', function () {
         truthy(signup_retry_after($pdo, $ip, 'gmail.com') !== null, 'tres altas reales alcanzan el tope');
     });
 });
+
+/**
+ * The one case here that is not about the limit at all, and the reason registering logged
+ * people in as user 0 for a while: this writes twice on the caller's own connection, so
+ * lastInsertId() no longer means what the caller thought. Its own INSERT replaces the id,
+ * and the prune -- a DELETE -- leaves it at 0.
+ *
+ * Nailed down rather than fixed here: a limit that both records and prunes is the right
+ * shape, and /api/register reading the id before calling this is the right fix. This is what
+ * fails if the reading ever drifts back down the function.
+ */
+test('deja lastInsertId() sin el id de la cuenta: quien registra ha de leerlo antes', function () {
+    $pdo = fresh_attempts();
+    test_truncate($pdo, 'users');
+    $pdo->prepare('INSERT INTO users(name,email,email_canonical,password_hash,style_profile,created_at) VALUES(?,?,?,?,?,?)')
+        ->execute(['Adri', 'a@ejemplo.com', 'a@ejemplo.com', 'x', '{}', date(DATE_ATOM)]);
+    $cuenta = (int) $pdo->lastInsertId();
+    truthy($cuenta > 0, 'el alta devuelve el id de la cuenta');
+
+    record_signup($pdo, signup_ip_hash('83.45.12.9'), 'gmail.com');
+    falsy((int) $pdo->lastInsertId() === $cuenta, 'después ya no es el id de la cuenta');
+});
