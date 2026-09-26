@@ -22,12 +22,15 @@ $profile = json_encode([
 ], JSON_UNESCAPED_UNICODE);
 
 if (!$userId) {
-    $stmt = $pdo->prepare('INSERT INTO users(name,email,password_hash,style_profile,is_test,created_at) VALUES(?,?,?,?,1,?)');
-    $stmt->execute(['Lucía Demo', $email, password_hash($password, PASSWORD_DEFAULT), $profile, date(DATE_ATOM)]);
+    // onboarding_done_at is set for the reason migration 011 backfilled it: an account whose
+    // profile is already written is not owed the welcome, and would only be nagged by a panel
+    // asking it to assemble two outfits it has no reason to assemble.
+    $stmt = $pdo->prepare('INSERT INTO users(name,email,password_hash,style_profile,onboarding_done_at,is_test,created_at) VALUES(?,?,?,?,?,1,?)');
+    $stmt->execute(['Lucía Demo', $email, password_hash($password, PASSWORD_DEFAULT), $profile, date(DATE_ATOM), date(DATE_ATOM)]);
     $userId = (int)$pdo->lastInsertId();
 } else {
-    $pdo->prepare('UPDATE users SET name=?,password_hash=?,style_profile=?,is_test=1 WHERE id=?')
-        ->execute(['Lucía Demo', password_hash($password, PASSWORD_DEFAULT), $profile, $userId]);
+    $pdo->prepare('UPDATE users SET name=?,password_hash=?,style_profile=?,onboarding_done_at=COALESCE(onboarding_done_at,?),is_test=1 WHERE id=?')
+        ->execute(['Lucía Demo', password_hash($password, PASSWORD_DEFAULT), $profile, date(DATE_ATOM), $userId]);
     $pdo->prepare('DELETE FROM garments WHERE user_id=?')->execute([$userId]);
 }
 

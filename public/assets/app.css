@@ -54,31 +54,49 @@
 .share-stats{font-size:11px;color:var(--muted);margin:14px 0 0}
 .share-outfit{margin-top:10px}
 
-/* The welcome at /bienvenida. One centred column: there is no wardrobe to navigate yet, and
-   the whole screen is a single question asked three times over. */
-.onboarding{max-width:720px;margin:0 auto;padding:clamp(28px,6vw,72px) clamp(16px,4vw,32px)}
-.onboarding h1{font:600 clamp(30px,4.5vw,44px)/1.1 'Playfair Display',serif;margin:12px 0 14px;letter-spacing:-1px}
-.onboarding-lead{font-size:16px;line-height:1.7;color:#5c6b65;margin:0 0 28px}
-.onboarding-hint{font-size:13px;color:var(--muted);margin:0 0 20px}
-.onboarding-privacy{font-size:11px;line-height:1.6;color:var(--muted);margin:22px 0 0}
-.style-slots{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:22px}
-.style-slot{position:relative;height:170px;overflow:hidden}
-.style-slot b{font-size:13px}
-.style-preview{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
-/* With a photo in it the slot is the photo: the label stays legible over it and the format
-   hint has nothing left to explain. */
-.style-slot:has(.style-preview:not([hidden])) b{position:relative;z-index:1;background:rgba(23,61,53,.78);color:#fff;padding:5px 12px;border-radius:3px;font-size:11px}
-.style-slot:has(.style-preview:not([hidden])) span{display:none}
-.style-note{display:grid;gap:8px;font-size:12px;font-weight:700;margin-bottom:22px}
-.style-note textarea{border:1px solid var(--line);background:#faf9f5;border-radius:3px;padding:13px;font:400 14px 'DM Sans';color:var(--ink);min-height:96px;resize:vertical}
-.style-note small{font-weight:400;font-size:11px;line-height:1.6;color:var(--muted)}
-#step-profile .profile-form{grid-template-columns:1fr;padding:26px}
-@media(max-width:600px){.style-slots{grid-template-columns:1fr 1fr}}
+/* The welcome, now a panel at the top of the wardrobe instead of a page of its own. It sits
+   above the toolbar because it is the first thing to do, and it disappears for good once the
+   reading has been accepted -- so it is allowed to be the loudest thing on the screen while
+   it is there. */
+.onboarding-panel{background:var(--ink);color:#fff;padding:clamp(22px,3vw,34px);margin-bottom:28px}
+.onboarding-panel[hidden]{display:none}
+.onboarding-panel .eyebrow{color:#9fb7ae}
+.onboarding-panel h2{font:600 clamp(26px,3vw,34px) 'Playfair Display',serif;margin:10px 0 12px}
+.onboarding-lead{font-size:15px;line-height:1.7;color:#c7d8d1;margin:0 0 22px}
+.onboarding-hint{font-size:12px;line-height:1.6;color:#9fb7ae;margin:18px 0 0}
+.onboarding-panel .progress{background:rgba(255,255,255,.18);max-width:520px}
+.onboarding-panel .btn{margin-top:20px}
+.onboarding-panel .form-error{color:#ffb9ac}
 
-/* The way back to the welcome, for as long as it is still owed. */
-.nudge{display:grid;gap:4px;background:var(--sage);padding:14px 16px;margin-bottom:8px;text-decoration:none;color:var(--ink)}
-.nudge b{font-size:13px}
-.nudge span{font-size:11px;line-height:1.5;color:#4d5c56}
+/* One card per look. Two columns where there is room, because the two are meant to be read
+   side by side: the question is whether they are different. */
+.outfit-builders{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px}
+.outfit-builder{background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.14);padding:18px}
+.outfit-builder.is-complete{border-color:var(--coral)}
+.outfit-builder h3{display:flex;justify-content:space-between;align-items:baseline;gap:10px;font:600 20px 'Playfair Display',serif;margin:0 0 14px}
+.outfit-builder h3 em{font:700 10px 'DM Sans',sans-serif;letter-spacing:1px;font-style:normal;color:#9fb7ae;white-space:nowrap}
+.outfit-builder.is-complete h3 em{color:var(--coral)}
+.outfit-builder ul{list-style:none;margin:0;padding:0;display:grid;gap:8px}
+.outfit-piece{position:relative;display:grid;gap:2px;background:rgba(255,255,255,.08);padding:10px 38px 10px 12px}
+.outfit-piece span{font-size:13px;font-weight:600}
+.outfit-piece small{font-size:10px;letter-spacing:.6px;color:#9fb7ae}
+.outfit-piece .delete-item{top:50%;transform:translateY(-50%);width:26px;height:26px;background:rgba(255,255,255,.14);color:#fff}
+.outfit-slot select{width:100%;height:42px;padding:0 10px;border:1px dashed rgba(255,255,255,.4);border-radius:3px;background:transparent;color:#fff;font:400 13px 'DM Sans',sans-serif}
+.outfit-slot select option{color:var(--ink)}
+.outfit-builder .text-btn{color:#c7d8d1;font-size:12px;margin-top:14px}
+
+/* The link to the shop, at the top of the new-garment form: it is the fast way in, and the
+   photo below it is the way that always works. */
+.link-lead{font-size:12px;line-height:1.6;color:var(--muted);margin:0 0 12px}
+.link-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;margin-bottom:18px}
+.link-row input{height:42px;border:1px solid var(--line);background:#faf9f5;border-radius:3px;padding:0 12px;font:400 13px 'DM Sans',sans-serif;color:var(--ink);min-width:0}
+.link-row .btn{white-space:nowrap}
+
+/* The verdict. One column: it is four boxes read top to bottom, not a form to fill in. */
+#reading-modal .profile-form{grid-template-columns:1fr;padding:0;background:transparent}
+#reading-modal .onboarding-lead{color:#5c6b65}
+#reading-modal .onboarding-hint{color:var(--muted)}
+@media(max-width:560px){.link-row{grid-template-columns:1fr}}
 
 /* The budget, next to the switch that makes it mean anything. The AI card is the light one,
    so this borrows the same ink and rules as every other field in the app. */

@@ -49,8 +49,11 @@ try {
             'budget' => 'Hasta 150 € por outfit',
             'occasions' => 'Trabajo, fin de semana, cenas y deporte',
         ], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
-        $pdo->prepare('INSERT INTO users(name,email,password_hash,style_profile,is_test,created_at) VALUES(?,?,?,?,1,?)')
-            ->execute([$name, $email, password_hash($credentials[$name], PASSWORD_DEFAULT), $profile, date(DATE_ATOM)]);
+        // Past the welcome, like every account that arrives with its profile already written:
+        // these two come with sixty garments and a style, so a panel asking them to assemble
+        // two outfits would be the first thing in the way of the thing being tested.
+        $pdo->prepare('INSERT INTO users(name,email,password_hash,style_profile,onboarding_done_at,is_test,created_at) VALUES(?,?,?,?,?,1,?)')
+            ->execute([$name, $email, password_hash($credentials[$name], PASSWORD_DEFAULT), $profile, date(DATE_ATOM), date(DATE_ATOM)]);
         $userId = (int)$pdo->lastInsertId();
         $insert = $pdo->prepare('INSERT INTO garments(user_id,name,brand,reference,category,color,size,season,notes,image_path,thumb_path,favorite,wear_count,created_at,source_url,price_note) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)');
         foreach ($catalog as $index => $item) {

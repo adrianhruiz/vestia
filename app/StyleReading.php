@@ -2,134 +2,48 @@
 declare(strict_types=1);
 
 /**
- * The photos somebody hands over so the stylist can describe their style, and what this app
- * is allowed to do with them.
+ * The stylist reading somebody's style off the looks they put together.
  *
- * Until now every image here was of a garment. These are of people: a face, a body, a living
- * room behind them. That is why this is its own file rather than a few more lines in
- * Images.php -- how long they live, who can reach them and how many there can be is decided
- * in one place, where it can be checked in one read.
+ * This file used to be about photographs of people -- a face, a body, a living room behind
+ * them -- and most of it was the rules for holding such a thing: where it could live, who
+ * could reach it, how few of them there could be, how fast they had to be destroyed. None of
+ * that is here any more, because nothing is uploaded any more. The input is two outfits from
+ * the person's own wardrobe (app/Outfits.php), which is data this app already keeps for its
+ * own reasons and does not have to apologise for.
  *
- * The rules: they never land under public/, nothing serves them over HTTP, the worker
- * deletes them the moment the reading ends however it ends, and whatever a run that died
- * halfway leaves behind is swept by style_photos_purge().
+ * What is left is the same in shape as before: a queued job, a limit on how often it may be
+ * asked for, and a verdict that lands in the form filled in rather than being saved behind
+ * anybody's back. A machine describing your style and being half right, with no way to
+ * argue, is a bad first thing to happen to you.
  */
-
-/**
- * Photos one reading may carry.
- *
- * One is enough to name a style, so one is what the screen requires. Three is where the next
- * photo stops showing the stylist anything the first two did not, and every one of them is
- * paid for twice: in the bytes of the request and in the input tokens they become.
- */
-const STYLE_PHOTO_MAX_COUNT = 3;
-
-/** The same ceiling a garment photo gets: it is the same phone producing it. */
-const STYLE_PHOTO_MAX_BYTES = 8 * 1024 * 1024;
-
-const STYLE_PHOTO_FORMATS = ['image/jpeg', 'image/png', 'image/webp'];
-
-/** Outside public/, so no URL reaches them even by accident. */
-const STYLE_PHOTO_DIR = APP_ROOT . '/storage/style';
-
-/**
- * How long a photo may outlive the job that was meant to consume it.
- *
- * In the ordinary case this never applies: the worker deletes them itself as the reading
- * ends. It is for the run that never ended -- a worker killed mid-call, a queued job whose
- * worker was down all night. Anything that old is of no use to anybody and is exactly the
- * kind of file that quietly accumulates for a year.
- */
-const STYLE_PHOTO_RETENTION_HOURS = 24;
 
 /**
  * Readings one account may ask for in a day.
  *
- * It is the most expensive thing a brand-new account can do and the first thing it is
- * offered, which is precisely the shape of what a script wants. Two rather than one because
- * the first can come back wrong, and reading a style is not something anyone needs to do
- * again this week.
+ * It is the most expensive thing a brand-new account can do and it is offered as soon as two
+ * looks exist, which is precisely the shape of what a script wants. Two rather than one
+ * because the first can come back wrong, and reading a style is not something anyone needs
+ * to do again this week.
  */
 const STYLE_READINGS_PER_DAY = 2;
-
-/** What the person adds in their own words. Capped like every other text that becomes prompt. */
-const STYLE_NOTE_MAX_LENGTH = STYLE_PROFILE_MAX_LENGTH;
 
 /**
  * The profile fields a reading is allowed to fill.
  *
- * Deliberately not STYLE_PROFILE_KEYS. A photograph cannot answer a size or a budget, and a
- * model asked for one anyway returns "M" and "hasta 120 €" that the person then reads as
- * something we knew about them. Naming the set here rather than accepting whatever comes
- * back means a key added to the profile later does not silently become something the photos
- * are expected to answer. OpenAI::readStyle() builds its schema from this same list, so what
- * is asked for and what is accepted cannot drift apart.
- */
-const STYLE_READING_KEYS = ['style', 'colors', 'occasions', 'avoid'];
-
-/** The directory, created on first use so a fresh checkout needs no setup step. */
-function style_photo_dir(): string {
-    if (!is_dir(STYLE_PHOTO_DIR)) @mkdir(STYLE_PHOTO_DIR, 0775, true);
-    return STYLE_PHOTO_DIR;
-}
-
-/** A new, unguessable name for one of $userId's photos. The prefix is what makes them findable again. */
-function style_photo_name(int $userId): string {
-    return $userId . '-' . bin2hex(random_bytes(12)) . '.jpg';
-}
-
-/**
- * The file behind a stored name, or null when the name is not one of ours or the file is
- * gone.
+ * Deliberately not STYLE_PROFILE_KEYS, and shorter than it by one. Clothes cannot answer a
+ * size or a budget -- neither is in the profile any more for that reason -- and they cannot
+ * answer `avoid` either: two looks somebody owns say nothing about what they would refuse to
+ * wear, and `avoid` is the field that decides what the stylist will never propose again.
+ * Filling it from an absence would quietly forbid every kind of garment nobody happened to
+ * group. It reaches the form empty, for the person to write themselves.
  *
- * The names travel inside jobs.input_json, written by the endpoint and read by the worker,
- * never by a request. Even so, nothing but a name this module itself produced gets through:
- * a job row is a string in a database, and "../../.env" arriving at unlink() would only need
- * one mistake somewhere else to become reachable.
+ * OpenAI::readStyle() builds its schema from this same list, so what is asked for and what is
+ * accepted cannot drift apart.
  */
-function style_photo_path(string $name): ?string {
-    if (!preg_match('/^[0-9]+-[0-9a-f]{24}\.jpg$/', $name)) return null;
-    $file = STYLE_PHOTO_DIR . '/' . $name;
-    return is_file($file) ? $file : null;
-}
+const STYLE_READING_KEYS = ['style', 'colors', 'occasions'];
 
-/** Every photo $userId still has on disk. */
-function style_photos_of_user(int $userId): array {
-    return array_map('basename', glob(STYLE_PHOTO_DIR . '/' . $userId . '-*.jpg') ?: []);
-}
-
-/** Deletes stored photos. A name that is not ours is skipped, never trusted. */
-function style_photos_delete(array $names): void {
-    foreach ($names as $name) {
-        if (!is_string($name)) continue;
-        $file = style_photo_path($name);
-        if ($file !== null) @unlink($file);
-    }
-}
-
-/**
- * Deletes the photos no job is going to read any more, and answers how many. Called where
- * new ones are stored, the way record_signup() prunes its own table: it keeps the directory
- * self-maintaining without a timer to install and forget.
- */
-function style_photos_purge(): int {
-    $deadline = time() - STYLE_PHOTO_RETENTION_HOURS * 3600;
-    $removed = 0;
-    foreach (glob(STYLE_PHOTO_DIR . '/*.jpg') ?: [] as $file) {
-        if ((int) @filemtime($file) > $deadline) continue;
-        if (@unlink($file)) $removed++;
-    }
-    return $removed;
-}
-
-/**
- * The MIME type of an upload we are willing to read, or null for anything else. Read from
- * the bytes rather than from what the browser called the file.
- */
-function style_photo_format(string $file): ?string {
-    $mime = (new finfo(FILEINFO_MIME_TYPE))->file($file);
-    return in_array($mime, STYLE_PHOTO_FORMATS, true) ? (string) $mime : null;
-}
+/** How much of a per-garment note the stylist needs. The same cap the wardrobe analysis uses. */
+const STYLE_READING_NOTES_MAX_LENGTH = 160;
 
 /**
  * The readings this account has spent in the last day, newest first.
@@ -138,9 +52,8 @@ function style_photo_format(string $file): ?string {
  * an ISO-8601 string carrying a local offset, and comparing those as strings silently
  * reverses order across the two days a year the clocks change.
  *
- * Failed runs do not count. The person got nothing out of one, and their photos were deleted
- * with it, so the only way forward is to upload again -- charging them for that would leave
- * an account unable to do the one thing it was just invited to do.
+ * Failed runs do not count. The person got nothing out of one, so charging them for it would
+ * leave an account unable to do the one thing it was just invited to do.
  */
 function recent_style_readings(PDO $pdo, int $userId): array {
     $stmt = $pdo->prepare("SELECT created_at FROM jobs WHERE user_id=? AND type='style_reading' AND status<>'failed' ORDER BY id DESC LIMIT 20");
@@ -171,14 +84,70 @@ function style_reading_retry_after(PDO $pdo, array $user): ?int {
 }
 
 /**
- * The job payload: the photos to read and the note to read them with. One function so the
- * endpoint that writes it and the worker that reads it cannot drift apart.
+ * The reading this account already has in flight or already finished, or null.
+ *
+ * One row does three jobs: it stops the second press buying a second reading, it is what the
+ * wardrobe panel resumes from after a reload in the middle of a run, and once it is
+ * completed it is where the verdict is read back from, since the verdict is not saved
+ * anywhere else until the person accepts it.
  */
-function style_reading_input(array $names, string $note): array {
-    return [
-        'photos' => array_values(array_filter($names, 'is_string')),
-        'note' => mb_substr(trim($note), 0, STYLE_NOTE_MAX_LENGTH),
-    ];
+function latest_style_reading(PDO $pdo, int $userId): ?array {
+    $stmt = $pdo->prepare("SELECT id,status,progress,phase,result_json,error FROM jobs WHERE user_id=? AND type='style_reading' ORDER BY id DESC LIMIT 1");
+    $stmt->execute([$userId]);
+    $job = $stmt->fetch();
+    if (!$job) return null;
+    $job['id'] = (int) $job['id'];
+    $job['result'] = $job['result_json'] ? json_decode((string) $job['result_json'], true) : null;
+    unset($job['result_json']);
+    return $job;
+}
+
+/**
+ * The job payload: the looks to read, reduced to what the stylist can use.
+ *
+ * Written here and read by the worker, so the two cannot drift apart. It is a snapshot on
+ * purpose -- the job is the record of what was actually read, and a look edited while the
+ * reading was queued must not change the meaning of an answer that is already coming back.
+ *
+ * Ids, photos and prices are dropped. The stylist is being asked what these clothes say
+ * about a person, and an id says nothing; nothing here is ever matched back to a row.
+ */
+function style_reading_input(array $outfits): array {
+    $looks = [];
+    // The first two and no more, which is the same set outfits_ready() judges. Somebody with
+    // ten grouped looks would be a better read and a much more expensive one, and two is what
+    // the instructions in readStyle() are written around.
+    foreach (array_slice($outfits, 0, ONBOARDING_OUTFITS) as $outfit) {
+        $garments = [];
+        foreach ($outfit['garments'] ?? [] as $garment) {
+            $garments[] = array_filter([
+                'name' => (string) ($garment['name'] ?? ''),
+                'brand' => (string) ($garment['brand'] ?? ''),
+                'category' => (string) ($garment['category'] ?? ''),
+                'color' => (string) ($garment['color'] ?? ''),
+                'size' => (string) ($garment['size'] ?? ''),
+                'season' => (string) ($garment['season'] ?? ''),
+                'notes' => mb_substr(trim((string) ($garment['notes'] ?? '')), 0, STYLE_READING_NOTES_MAX_LENGTH),
+            ], static fn(string $value): bool => $value !== '');
+        }
+        if ($garments) $looks[] = ['name' => (string) ($outfit['name'] ?? ''), 'garments' => $garments];
+    }
+    return ['outfits' => $looks];
+}
+
+/**
+ * Queues one reading of these looks and answers the id of the job that will carry it.
+ *
+ * The caller decides whether it may: the limit, whether one is already in flight and whether
+ * the welcome is still owed are all policy, and they are asked in the endpoint and in
+ * onboarding_advance() rather than hidden in here. This writes the row.
+ */
+function style_reading_queue(PDO $pdo, int $userId, array $outfits): int {
+    $stmt = $pdo->prepare("INSERT INTO jobs(user_id,type,status,input_json,created_at) VALUES(?,'style_reading','queued',?,?)");
+    $stmt->execute([$userId, json_encode(style_reading_input($outfits), JSON_UNESCAPED_UNICODE), date(DATE_ATOM)]);
+    // Read on the line after the INSERT and nowhere further down: lastInsertId() belongs to
+    // the connection, not to this statement.
+    return (int) $pdo->lastInsertId();
 }
 
 /**
@@ -186,7 +155,7 @@ function style_reading_input(array $names, string $note): array {
  * trimmed and capped by style_profile() like anything else that reaches the profile, plus
  * the sentence the screen shows so the verdict is not a set of boxes that filled themselves.
  *
- * Empty fields are dropped, which is the whole point -- something the photos could not
+ * Empty fields are dropped, which is the whole point -- something the clothes could not
  * answer has to reach the form empty rather than filled with a guess.
  */
 function style_reading_result(array $answer): array {
