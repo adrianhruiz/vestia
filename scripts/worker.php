@@ -135,6 +135,8 @@ do {
         if (daily_job_ceiling_reached($pdo, (int) $job['id'])) {
             throw new RuntimeException('Hoy se ha alcanzado el tope de peticiones a la IA de este entorno. Vuelve a intentarlo mañana.');
         }
+        require_once APP_ROOT . '/log/app/Capture.php';
+        VestiaLogCapture::$context = ['environment' => basename(APP_ROOT), 'user_id' => (int)$job['user_id'], 'job_id' => (int)$job['id'], 'operation' => (string)$job['type']];
         $ai = new OpenAI($key);
         $result = match ($job['type']) {
             'outfit_image' => run_outfit_image($pdo, $ai, $job, $announce, $stopIfCancelled),

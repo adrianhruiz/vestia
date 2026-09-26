@@ -165,15 +165,32 @@ final class OpenAI {
     }
 
     private function request(string $path, array $payload, int $timeout = 120): array {
+        require_once dirname(__DIR__) . '/log/app/Capture.php';
+        $trace = VestiaLogCapture::start($path, $payload, $this->key);
+        $started = microtime(true); $requestId = ''; $status = 0; $data = null; $error = null;
         $ch = curl_init('https://api.openai.com/v1' . $path);
-        curl_setopt_array($ch, [CURLOPT_POST => true, CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_HTTPHEADER => ['Authorization: Bearer ' . $this->key, 'Content-Type: application/json'],
-            CURLOPT_POSTFIELDS => json_encode($payload), CURLOPT_TIMEOUT => $timeout]);
-        $body = curl_exec($ch); $status = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        if ($body === false) throw new RuntimeException('Error de red con OpenAI: ' . curl_error($ch));
-        $data = json_decode($body, true);
-        if ($status >= 400) throw new RuntimeException($data['error']['message'] ?? "OpenAI respondió {$status}");
-        return is_array($data) ? $data : [];
+        try {
+            curl_setopt_array($ch, [CURLOPT_POST => true, CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_HTTPHEADER => ['Authorization: Bearer ' . $this->key, 'Content-Type: application/json'],
+                CURLOPT_POSTFIELDS => json_encode($payload), CURLOPT_TIMEOUT => $timeout,
+                CURLOPT_HEADERFUNCTION => static function ($handle, string $header) use (&$requestId): int {
+                    if (stripos($header, 'x-request-id:') === 0) $requestId = trim(substr($header, 13));
+                    return strlen($header);
+                }]);
+            $body = curl_exec($ch); $status = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            if ($body === false) throw new RuntimeException('Error de red con OpenAI: ' . curl_error($ch));
+            $data = json_decode($body, true);
+            if (!is_array($data)) {
+                $data = ['unparsed_body' => $body];
+                throw new RuntimeException('OpenAI no devolvió una respuesta JSON válida.');
+            }
+            if ($status >= 400) throw new RuntimeException($data['error']['message'] ?? "OpenAI respondió {$status}");
+            return $data;
+        } catch (Throwable $e) { $error = $e->getMessage(); throw $e; }
+        finally {
+            VestiaLogCapture::finish($trace, $data, $status, microtime(true) - $started, $error, $requestId, $this->key);
+            curl_close($ch);
+        }
     }
 
     private function outputText(array $response): string {
@@ -189,4 +206,3 @@ final class OpenAI {
         return array_values($sources);
     }
 }
-
