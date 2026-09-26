@@ -5,7 +5,7 @@ const openModal=id=>$(id).hidden=false;const closeModal=m=>m.closest('.modal').h
 $$('[data-close]').forEach(b=>b.onclick=()=>closeModal(b));$$('.modal').forEach(m=>m.onclick=e=>{if(e.target===m)m.hidden=true});
 let authMode='login';function setAuth(mode){authMode=mode;$('#auth-title').textContent=mode==='login'?'Entrar':'Crea tu armario';$('.register-only').style.display=mode==='register'?'grid':'none';$('#auth-switch').textContent=mode==='login'?'¿No tienes cuenta? Crear armario':'Ya tengo cuenta';openModal('#auth-modal')}
 $$('[data-open-auth]').forEach(b=>b.onclick=()=>setAuth(b.dataset.openAuth));$('#auth-switch')?.addEventListener('click',()=>setAuth(authMode==='login'?'register':'login'));
-$('#auth-form')?.addEventListener('submit',async e=>{e.preventDefault();const f=new FormData(e.currentTarget),body=Object.fromEntries(f);const err=$('.form-error',e.currentTarget);err.textContent='';try{await api('/api/'+authMode,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});window.APP.after_auth?location.assign(window.APP.after_auth):location.reload()}catch(x){err.textContent=x.message}});
+$('#auth-form')?.addEventListener('submit',async e=>{e.preventDefault();const f=new FormData(e.currentTarget),body=Object.fromEntries(f);const err=$('.form-error',e.currentTarget);err.textContent='';try{const r=await api('/api/'+authMode,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const next=r.next||window.APP.after_auth;next?location.assign(next):location.reload()}catch(x){err.textContent=x.message}});
 $('#logout')?.addEventListener('click',async()=>{await api('/api/logout',{method:'POST'});location.reload()});
 if(document.body.dataset.auth==='1'){
  let activeJob=null,pollTimer=null,polling=false,garmentCache=[],resultJobId=null,lastResult=null,shares={};
@@ -144,3 +144,69 @@ if(document.body.dataset.auth==='1'){
  loadJobs();
 }
 function esc(v=''){const d=document.createElement('div');d.textContent=String(v);return d.innerHTML}function safeUrl(u=''){try{const x=new URL(u);return x.protocol==='https:'?x.href:'#'}catch{return '#'}}function safeAssetUrl(u=''){try{const x=new URL(u,location.origin);return x.origin===location.origin?x.href:'#'}catch{return '#'}}function thumbOf(g){return g?.thumb_path||g?.image_path||''}function garmentIcon(category=''){return {'Partes de arriba':'♙','Partes de abajo':'♜','Vestidos':'♕','Abrigos':'♖','Calzado':'♢','Accesorios':'○'}[category]||'♧'}
+
+// The welcome at /bienvenida. Three steps in one page -- photos, the wait, the verdict --
+// because a reading takes half a minute and a page that navigates twice in that time feels
+// like something went wrong.
+if(document.body.dataset.onboarding==='1'){
+ const show=id=>$$('.onboarding-step').forEach(s=>s.hidden=s.id!==id);
+ const urls=new Map();
+ $$('.style-slot').forEach(slot=>{
+  const input=$('input',slot),preview=$('img',slot),label=$('b',slot);
+  input.addEventListener('change',()=>{
+   if(urls.has(input))URL.revokeObjectURL(urls.get(input));
+   const file=input.files[0];
+   if(file)urls.set(input,URL.createObjectURL(file));else urls.delete(input);
+   preview.src=file?urls.get(input):'';preview.hidden=!file;label.textContent=file?'Cambiar':'＋ Foto'
+  })
+ });
+ $('#onboarding-skip').onclick=async()=>{try{await api('/api/onboarding/skip',{method:'POST'});location.assign(window.APP.next)}catch(x){toast(x.message)}};
+
+ // Same shape as the analysis poll: back off towards ten seconds, stop while the tab is in
+ // the background, and give up rather than poll a job that is never going to answer.
+ const POLL_MIN=2000,POLL_MAX=10000,POLL_GROWTH=1.4,POLL_GIVE_UP=5*60*1000;
+ let pollDelay=POLL_MIN,startedAt=0,timer=null;
+ const fail=message=>{clearTimeout(timer);show('step-photos');$('.form-error',$('#style-form')).textContent=message};
+ const fill=result=>{
+  $('#reading-summary').textContent=result.summary||'Ya tengo una idea de cómo vistes.';
+  for(const [name,value] of Object.entries(result)){const field=$(`[name="${name}"]`,$('#onboarding-profile'));if(field)field.value=value}
+  show('step-profile')
+ };
+ async function poll(id){
+  if(document.hidden)return timer=setTimeout(()=>poll(id),POLL_MIN);
+  if(Date.now()-startedAt>POLL_GIVE_UP)return fail('La lectura está tardando más de lo normal. Vuelve a intentarlo.');
+  try{
+   const {job}=await api('/api/jobs/'+id);
+   if(job.phase)$('#reading-phase').textContent=job.phase;
+   $('.progress i',$('#step-reading')).style.width=Math.max(10,job.progress)+'%';
+   if(job.status==='completed')return fill(job.result||{});
+   if(job.status==='failed'||job.status==='cancelled')return fail(job.error||'No he podido leer esas fotos. Prueba con otras.');
+   pollDelay=Math.min(Math.round(pollDelay*POLL_GROWTH),POLL_MAX);
+   timer=setTimeout(()=>poll(id),pollDelay)
+  }catch(x){fail(x.message)}
+ }
+
+ $('#style-form').addEventListener('submit',async e=>{
+  e.preventDefault();
+  const err=$('.form-error',e.currentTarget);err.textContent='';
+  const body=new FormData();
+  // An empty slot is a slot nobody filled: sending it would be an upload error the person
+  // never made.
+  $$('.style-slot input').forEach(input=>{if(input.files[0])body.append('photos[]',input.files[0])});
+  if(!body.has('photos[]'))return err.textContent='Sube al menos una foto, o elige «Lo haré luego».';
+  body.append('note',$('[name=note]',e.currentTarget).value);
+  try{
+   const d=await api('/api/style-reading',{method:'POST',body});
+   show('step-reading');pollDelay=POLL_MIN;startedAt=Date.now();poll(d.job_id)
+  }catch(x){err.textContent=x.message}
+ });
+
+ $('#onboarding-profile').addEventListener('submit',async e=>{
+  e.preventDefault();
+  const err=$('.form-error',e.currentTarget);err.textContent='';
+  try{
+   await api('/api/profile',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.fromEntries(new FormData(e.currentTarget)))});
+   location.assign(window.APP.next)
+  }catch(x){err.textContent=x.message}
+ });
+}
