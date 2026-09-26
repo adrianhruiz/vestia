@@ -111,10 +111,11 @@ gh pr create --base develop --fill
 El flujo completo —revisión, publicación a producción, hotfixes y convenciones— está en
 **[CONTRIBUTING.md](CONTRIBUTING.md)**.
 
-## Versión 0.0.2 y cuentas de prueba
+## Versión 0.0.6 y cuentas de prueba
 
 El archivo `VERSION` identifica la versión del código desplegado. La cabecera muestra
-«Versión 0.0.2» tanto en la portada como después de iniciar sesión, también en móvil.
+«Versión 0.0.6» en la portada, dentro de la aplicación, en el catálogo y en la página
+pública de un look compartido, también en móvil.
 Para cambiar la versión en futuros despliegues, actualiza ese archivo en la rama correspondiente.
 
 Los slots `adrian` y `raul` disponen de estas cuentas ficticias; se inicia sesión con el correo:
@@ -139,10 +140,8 @@ crea ambas cuentas y sus armarios en una transacción y omite las cuentas que ya
 sin cambiar sus contraseñas ni borrar prendas o análisis. No uses `seed_demo.php` ni
 `import_official_catalog.php` para estas cuentas: esos scripts reemplazan datos existentes.
 
-La copia local actualizada está en `/home/saymon/php-projects/vestia`, basada en
-`adrianhruiz/vestia`. La antigua `/home/saymon/php-projects/armario` se conserva como histórico.
-El trabajo de esta versión está en `feature/version-002-test-wardrobes`, creada desde
-`develop`; ambos slots se despliegan desde esa rama. PRE y PROD conservan su flujo habitual.
+Cada slot despliega la rama que se esté probando en él, y hoy los dos están en `develop`.
+PRE y PROD conservan su flujo habitual.
 
 ## Estructura
 
