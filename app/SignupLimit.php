@@ -13,9 +13,16 @@ declare(strict_types=1);
  * anything, and a rejected attempt costs us a row we never wrote.
  */
 
-/** Accounts one origin may open. The day window is what a slow drip runs into. */
-const SIGNUPS_PER_IP_PER_HOUR = 3;
-const SIGNUPS_PER_IP_PER_DAY = 8;
+/**
+ * Accounts one origin may open. The day window is what a slow drip runs into.
+ *
+ * Defaults, not the last word: every window reads its ceiling from the environment, because
+ * the number that makes sense for production is not the one a test slot needs. Registering
+ * is the first step of nearly every manual test, and three an hour is spent before the
+ * morning is over -- the tester then waits on a countdown to test anything at all.
+ */
+const SIGNUPS_PER_IP_PER_HOUR = 10;
+const SIGNUPS_PER_IP_PER_DAY = 30;
 
 /**
  * Accounts one email domain may produce in an hour, for domains nobody shares.
@@ -25,7 +32,20 @@ const SIGNUPS_PER_IP_PER_DAY = 8;
  * anything wrong. It is deliberately low, which is only safe because the domains where a
  * crowd of unrelated people genuinely share an address space are exempt below.
  */
-const SIGNUPS_PER_DOMAIN_PER_HOUR = 5;
+const SIGNUPS_PER_DOMAIN_PER_HOUR = 10;
+
+/**
+ * The ceiling this window actually runs with: whatever the environment says, or the default
+ * above when it says nothing. 0 switches the window off entirely, which is what a test slot
+ * wants and what OPENAI_MAX_JOBS_PER_DAY already means elsewhere.
+ *
+ * Anything that is not a plain number falls back to the default. A typo in a .env must not
+ * quietly read as 0 and leave the form wide open.
+ */
+function signup_limit(string $key, int $default): int {
+    $value = trim((string) env($key, ''));
+    return ctype_digit($value) ? (int) $value : $default;
+}
 
 /**
  * Consumer providers the domain limit must not touch. Ten strangers signing up from
@@ -75,12 +95,16 @@ function signup_major_domain(string $domain): bool {
  * Counted in PHP rather than in SQL, for the reason recent_analyses() gives: created_at is
  * an ISO-8601 string carrying a local offset, and comparing those as strings silently
  * reverses order across the two days a year the clocks change.
+ *
+ * $needed is the largest count any window using these rows can care about; the margin over
+ * it is there because rows come back in id order, which a seeded row or a moved clock can
+ * put out of step with the clock order the windows are measured in.
  */
-function recent_signups(PDO $pdo, string $field, string $value): array {
+function recent_signups(PDO $pdo, string $field, string $value, int $needed): array {
     $column = ['ip' => 'ip_hash', 'domain' => 'email_domain'][$field] ?? null;
     if ($column === null) throw new InvalidArgumentException('Unknown signup limit field: ' . $field);
-    // Comfortably more than the widest window allows, so the window itself decides the count.
-    $stmt = $pdo->prepare("SELECT created_at FROM signup_attempts WHERE {$column}=? ORDER BY id DESC LIMIT 50");
+    $limit = max(1, $needed) * 2 + 10;
+    $stmt = $pdo->prepare("SELECT created_at FROM signup_attempts WHERE {$column}=? ORDER BY id DESC LIMIT {$limit}");
     $stmt->execute([$value]);
 
     $times = [];
@@ -112,17 +136,23 @@ function signups_within(array $times, int $seconds): array {
  * whose slot frees up first, so that is what the countdown is measured from.
  */
 function signup_retry_after(PDO $pdo, string $ipHash, string $domain): ?int {
+    $perHour = signup_limit('SIGNUPS_PER_IP_PER_HOUR', SIGNUPS_PER_IP_PER_HOUR);
+    $perDay = signup_limit('SIGNUPS_PER_IP_PER_DAY', SIGNUPS_PER_IP_PER_DAY);
+    $perDomain = signup_limit('SIGNUPS_PER_DOMAIN_PER_HOUR', SIGNUPS_PER_DOMAIN_PER_HOUR);
+
     $windows = [];
-    $byIp = recent_signups($pdo, 'ip', $ipHash);
-    $windows[] = [signups_within($byIp, 3600), SIGNUPS_PER_IP_PER_HOUR, 3600];
-    $windows[] = [signups_within($byIp, 86400), SIGNUPS_PER_IP_PER_DAY, 86400];
-    if (!signup_major_domain($domain)) {
-        $windows[] = [signups_within(recent_signups($pdo, 'domain', $domain), 3600), SIGNUPS_PER_DOMAIN_PER_HOUR, 3600];
+    if ($perHour > 0 || $perDay > 0) {
+        $byIp = recent_signups($pdo, 'ip', $ipHash, max($perHour, $perDay));
+        $windows[] = [signups_within($byIp, 3600), $perHour, 3600];
+        $windows[] = [signups_within($byIp, 86400), $perDay, 86400];
+    }
+    if ($perDomain > 0 && !signup_major_domain($domain)) {
+        $windows[] = [signups_within(recent_signups($pdo, 'domain', $domain, $perDomain), 3600), $perDomain, 3600];
     }
 
     $wait = null;
     foreach ($windows as [$recent, $allowed, $seconds]) {
-        if (count($recent) < $allowed) continue;
+        if ($allowed === 0 || count($recent) < $allowed) continue;
         $oldest = end($recent);
         $wait = max($wait ?? 0, max(1, $oldest->getTimestamp() + $seconds - time()));
     }
