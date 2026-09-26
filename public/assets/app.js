@@ -3,7 +3,13 @@ const api=async(url,options={})=>{options.headers={...(options.headers||{}),'X-C
 const toast=m=>{const t=$('#toast');t.textContent=m;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2600)};
 const openModal=id=>$(id).hidden=false;const closeModal=m=>m.closest('.modal').hidden=true;
 $$('[data-close]').forEach(b=>b.onclick=()=>closeModal(b));$$('.modal').forEach(m=>m.onclick=e=>{if(e.target===m)m.hidden=true});
-let authMode='login';function setAuth(mode){authMode=mode;$('#auth-title').textContent=mode==='login'?'Entrar':'Crea tu armario';$('.register-only').style.display=mode==='register'?'grid':'none';$('#auth-switch').textContent=mode==='login'?'¿No tienes cuenta? Crear armario':'Ya tengo cuenta';openModal('#auth-modal')}
+// The eye next to the password shows what you typed: it is the only way to catch a typo in a
+// field of ten dots. It reverts to dots every time the form opens, so a revealed password is
+// never what the next person to look at the screen finds.
+const authPassword=$('#auth-password'),passwordToggle=$('#password-toggle');
+const showPassword=show=>{if(!authPassword)return;authPassword.type=show?'text':'password';const label=show?'Ocultar contraseña':'Mostrar contraseña';passwordToggle.setAttribute('aria-pressed',show?'true':'false');passwordToggle.setAttribute('aria-label',label);passwordToggle.title=label};
+passwordToggle?.addEventListener('click',()=>{showPassword(authPassword.type==='password');authPassword.focus()});
+let authMode='login';function setAuth(mode){authMode=mode;showPassword(false);$('#auth-title').textContent=mode==='login'?'Entrar':'Crea tu armario';$('.register-only').style.display=mode==='register'?'grid':'none';$('#auth-switch').textContent=mode==='login'?'¿No tienes cuenta? Crear armario':'Ya tengo cuenta';openModal('#auth-modal')}
 $$('[data-open-auth]').forEach(b=>b.onclick=()=>setAuth(b.dataset.openAuth));$('#auth-switch')?.addEventListener('click',()=>setAuth(authMode==='login'?'register':'login'));
 $('#auth-form')?.addEventListener('submit',async e=>{e.preventDefault();const f=new FormData(e.currentTarget),body=Object.fromEntries(f);const err=$('.form-error',e.currentTarget);err.textContent='';try{const r=await api('/api/'+authMode,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const next=r.next||window.APP.after_auth;next?location.assign(next):location.reload()}catch(x){err.textContent=x.message}});
 // The avatar used to be the logout button itself, so opening your own account and leaving it
