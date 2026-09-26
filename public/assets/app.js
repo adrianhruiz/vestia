@@ -6,6 +6,17 @@ $$('[data-close]').forEach(b=>b.onclick=()=>closeModal(b));$$('.modal').forEach(
 let authMode='login';function setAuth(mode){authMode=mode;$('#auth-title').textContent=mode==='login'?'Entrar':'Crea tu armario';$('.register-only').style.display=mode==='register'?'grid':'none';$('#auth-switch').textContent=mode==='login'?'¿No tienes cuenta? Crear armario':'Ya tengo cuenta';openModal('#auth-modal')}
 $$('[data-open-auth]').forEach(b=>b.onclick=()=>setAuth(b.dataset.openAuth));$('#auth-switch')?.addEventListener('click',()=>setAuth(authMode==='login'?'register':'login'));
 $('#auth-form')?.addEventListener('submit',async e=>{e.preventDefault();const f=new FormData(e.currentTarget),body=Object.fromEntries(f);const err=$('.form-error',e.currentTarget);err.textContent='';try{const r=await api('/api/'+authMode,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const next=r.next||window.APP.after_auth;next?location.assign(next):location.reload()}catch(x){err.textContent=x.message}});
+// The avatar used to be the logout button itself, so opening your own account and leaving it
+// were the same click. It opens a menu now, and only the last item in it ends the session.
+const accountToggle=$('#account-toggle'),accountMenu=$('#account-menu');
+if(accountToggle){
+ const showAccount=open=>{accountMenu.hidden=!open;accountToggle.setAttribute('aria-expanded',open?'true':'false')};
+ accountToggle.addEventListener('click',e=>{e.stopPropagation();showAccount(accountMenu.hidden)});
+ // Anything chosen in the menu has done its own work by the time this runs, so the menu closes.
+ accountMenu.addEventListener('click',()=>showAccount(false));
+ document.addEventListener('click',e=>{if(!accountMenu.hidden&&!accountMenu.contains(e.target)&&e.target!==accountToggle)showAccount(false)});
+ document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!accountMenu.hidden){showAccount(false);accountToggle.focus()}});
+}
 $('#logout')?.addEventListener('click',async()=>{await api('/api/logout',{method:'POST'});location.reload()});
 if(document.body.dataset.auth==='1'){
  let activeJob=null,pollTimer=null,polling=false,garmentCache=[],resultJobId=null,lastResult=null,shares={};
