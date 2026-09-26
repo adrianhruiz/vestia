@@ -101,12 +101,20 @@ final class OpenAI {
         }
         $payload = [
             'model' => env('OPENAI_MODEL', 'gpt-5.5'),
+            // style is the one field that runs long, and the only one the cap ever bit: a
+            // stylist that does not know the limit writes past it and has mb_substr() end
+            // the sentence mid-word. The others are a colour or two and an occasion or two,
+            // and handing them the same budget only invites them to fill it.
+            // STYLE_PROFILE_MAX_LENGTH is named rather than repeated as a number, so the
+            // length asked for and the length stored cannot drift apart.
             'instructions' => 'Eres un estilista personal experto en tendencias actuales en España. '
                 . 'Mira las fotos y describe el estilo de quien te las envía, en segunda persona y en español claro. '
                 . 'Habla solo de ropa: prendas, cortes, tejidos, colores y cómo se combinan. '
                 . 'No describas a la persona ni el lugar: nada de edad, cuerpo, peso, género ni origen. '
                 . 'Deja vacío cualquier campo que no puedas deducir de lo que ves; inventarlo es peor que no decir nada. '
                 . 'Rellena avoid solo si la nota dice expresamente qué no quiere ponerse. '
+                . 'style, ' . STYLE_PROFILE_MAX_LENGTH . ' caracteres como mucho: es un perfil que la persona va a leer y corregir, no un informe. '
+                . 'Si no cabe todo, quédate con lo que más se repite en las fotos. '
                 . 'summary es una frase corta que resuma lo que has visto.',
             'input' => [['role' => 'user', 'content' => $content]],
             'text' => ['format' => ['type' => 'json_schema', 'name' => 'style_reading', 'strict' => true, 'schema' => $schema]],
