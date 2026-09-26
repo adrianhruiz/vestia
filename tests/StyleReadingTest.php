@@ -1,47 +1,27 @@
 <?php
 declare(strict_types=1);
-require_once APP_ROOT . '/app/Images.php';
+require_once APP_ROOT . '/app/Wardrobe.php';
+require_once APP_ROOT . '/app/Outfits.php';
 require_once APP_ROOT . '/app/Analysis.php';
 require_once APP_ROOT . '/app/StyleReading.php';
 
 /**
- * These photos are of people, so most of what follows is not about images at all: it is
- * about the promises the screen makes on their behalf. That they are never reachable by
- * name from outside, that deleting them deletes them, that nothing of the original file
- * survives into the copy we send away, and that one account cannot ask for readings all day.
+ * The reading used to take photographs of people, and most of this file used to be about the
+ * promises made on their behalf: unreachable by name, deleted when deleting them was
+ * promised, stripped of everything the camera wrote. None of that exists any more, because
+ * nothing is uploaded: the input is two outfits out of the person's own wardrobe.
+ *
+ * What is left to protect is narrower and still worth a test each. That the snapshot sent to
+ * the model carries the clothes and nothing else. That a field the stylist could not answer
+ * arrives at the form empty rather than invented. And that one account cannot ask for
+ * readings all day.
  */
 
-/** A real image on disk, in $format, filled with a flat colour. */
-function style_test_image(int $width, int $height, string $format = 'jpeg'): string {
-    $image = imagecreatetruecolor($width, $height);
-    imagefill($image, 0, 0, imagecolorallocate($image, 200, 40, 40));
-    $file = (string) tempnam(sys_get_temp_dir(), 'styletest');
-    $format === 'png' ? imagepng($image, $file) : imagejpeg($image, $file);
-    imagedestroy($image);
-    return $file;
-}
-
-/** A JPEG carrying an APP1 segment, which is where a camera writes its EXIF and its GPS. */
-function style_test_jpeg_with_exif(string $marker): string {
-    $file = style_test_image(60, 40);
-    $bytes = (string) file_get_contents($file);
-    $payload = "Exif\0\0" . $marker;
-    $segment = "\xFF\xE1" . pack('n', strlen($payload) + 2) . $payload;
-    file_put_contents($file, substr($bytes, 0, 2) . $segment . substr($bytes, 2));
-    return $file;
-}
-
-/** Stores $source as one of $userId's photos and returns [name, absolute path]. */
-function style_test_store(string $source, int $userId = 999001): array {
-    $name = style_photo_name($userId);
-    store_style_photo($source, (string) style_photo_format($source), style_photo_dir(), $name);
-    return [$name, style_photo_dir() . '/' . $name];
-}
-
-/** Writes a finished reading as though it had happened $hoursAgo hours ago. */
-function seed_style_reading(PDO $pdo, int $userId, int $hoursAgo, string $status = 'completed'): void {
-    $pdo->prepare('INSERT INTO jobs(user_id,type,status,input_json,created_at) VALUES(?,?,?,?,?)')
-        ->execute([$userId, 'style_reading', $status, '{}', date(DATE_ATOM, time() - $hoursAgo * 3600)]);
+/** Writes a reading as though it had happened $hoursAgo hours ago. */
+function seed_style_reading(PDO $pdo, int $userId, int $hoursAgo, string $status = 'completed', ?string $result = null): int {
+    $pdo->prepare('INSERT INTO jobs(user_id,type,status,input_json,result_json,created_at) VALUES(?,?,?,?,?,?)')
+        ->execute([$userId, 'style_reading', $status, '{}', $result, date(DATE_ATOM, time() - $hoursAgo * 3600)]);
+    return (int) $pdo->lastInsertId();
 }
 
 /** An account to hang jobs off, since jobs.user_id is a foreign key. */
@@ -57,162 +37,47 @@ function fresh_style_jobs(): PDO {
     return $pdo;
 }
 
-describe('store_style_photo() · la copia que se envía');
-
-test('una foto grande se reduce al lado máximo', function () {
-    $source = style_test_image(2000, 1200);
-    [, $stored] = style_test_store($source);
-    try {
-        [$width, $height] = (array) getimagesize($stored);
-        same(STYLE_PHOTO_MAX_SIDE, $width, 'el lado largo queda en el máximo');
-        same(614, $height, 'y el otro conserva la proporción');
-    } finally { @unlink($source); @unlink($stored); }
-});
-
-test('una foto pequeña no se amplía', function () {
-    $source = style_test_image(400, 300);
-    [, $stored] = style_test_store($source);
-    try { same([400, 300], array_slice((array) getimagesize($stored), 0, 2)); }
-    finally { @unlink($source); @unlink($stored); }
-});
-
-test('la copia es siempre JPEG, venga como venga', function () {
-    foreach (['jpeg' => 'image/jpeg', 'png' => 'image/png'] as $format => $mime) {
-        $source = style_test_image(80, 80, $format);
-        same($mime, style_photo_format($source), "el original es {$mime}");
-        [, $stored] = style_test_store($source);
-        try { same('image/jpeg', style_photo_format($stored)); }
-        finally { @unlink($source); @unlink($stored); }
-    }
-});
-
-test('un PNG transparente no llega como silueta negra', function () {
-    // JPEG no tiene alfa y GD rellena de negro lo que no puede conservar: un recorte de
-    // producto, que es justo lo que alguien sube como inspiración, llegaría en sombra.
-    $file = (string) tempnam(sys_get_temp_dir(), 'styletest');
-    $image = imagecreatetruecolor(50, 50);
-    imagealphablending($image, false);
-    imagesavealpha($image, true);
-    imagefill($image, 0, 0, (int) imagecolorallocatealpha($image, 0, 0, 0, 127));
-    imagepng($image, $file);
-    imagedestroy($image);
-
-    [, $stored] = style_test_store($file);
-    try {
-        $copy = imagecreatefromjpeg($stored);
-        $color = imagecolorsforindex($copy, imagecolorat($copy, 25, 25));
-        imagedestroy($copy);
-        truthy($color['red'] > 240 && $color['green'] > 240 && $color['blue'] > 240, 'el fondo transparente queda blanco, no negro');
-    } finally { @unlink($file); @unlink($stored); }
-});
-
-test('el EXIF del original no viaja en la copia', function () {
-    // Es el bloque donde el móvil escribe, entre otras cosas, las coordenadas de tu casa.
-    $marker = 'COORDENADAS-DE-CASA-' . bin2hex(random_bytes(6));
-    $source = style_test_jpeg_with_exif($marker);
-    truthy(str_contains((string) file_get_contents($source), $marker), 'el original sí lo lleva');
-    [, $stored] = style_test_store($source);
-    try { falsy(str_contains((string) file_get_contents($stored), $marker), 'la copia no'); }
-    finally { @unlink($source); @unlink($stored); }
-});
-
-describe('style_photo_path() · nombres que vienen de la base de datos');
-
-test('acepta un nombre que hemos creado nosotros', function () {
-    $source = style_test_image(40, 40);
-    [$name, $stored] = style_test_store($source);
-    try { same($stored, style_photo_path($name)); }
-    finally { @unlink($source); @unlink($stored); }
-});
-
-$nombresRotos = [
-    '../../.env'                                  => 'un recorrido de directorios',
-    'subdir/999001-aaaaaaaaaaaaaaaaaaaaaaaa.jpg'  => 'una barra',
-    '/etc/passwd'                                 => 'una ruta absoluta',
-    ''                                            => 'el nombre vacío',
-    '999001-abc.jpg'                              => 'un sufijo que no es el nuestro',
-    '999001-aaaaaaaaaaaaaaaaaaaaaaaa.php'         => 'otra extensión',
-    '999001-AAAAAAAAAAAAAAAAAAAAAAAA.jpg'         => 'hexadecimal en mayúsculas, que no generamos',
-];
-foreach ($nombresRotos as $nombre => $why) {
-    test('rechaza ' . $why, fn() => same(null, style_photo_path($nombre)));
+/** One look, in the shape outfits_of_user() hands over. */
+function style_test_outfit(string $name, array $garments): array {
+    return ['id' => 1, 'name' => $name, 'garments' => $garments];
 }
 
-test('un nombre con la forma correcta pero sin fichero devuelve null', function () {
-    same(null, style_photo_path('999001-' . str_repeat('a', 24) . '.jpg'));
+describe('style_reading_input() · el retrato que se le envía al estilista');
+
+test('viaja la ropa y nada más', function () {
+    $input = style_reading_input([
+        style_test_outfit('Outfit 1', [[
+            'id' => 7, 'name' => 'Camisa fluida', 'brand' => 'Zara', 'category' => GARMENT_TOP,
+            'color' => 'Crudo', 'size' => 'M', 'season' => 'Todo el año', 'notes' => 'Lino',
+            'image_path' => '/uploads/x.webp', 'thumb_path' => '/uploads/x-thumb.webp',
+        ]]),
+    ]);
+    $garment = $input['outfits'][0]['garments'][0];
+    same(['name', 'brand', 'category', 'color', 'size', 'season', 'notes'], array_keys($garment), 'ni ids ni rutas de imagen');
+    same('Outfit 1', $input['outfits'][0]['name']);
 });
 
-describe('style_photos_delete()');
-
-test('borra las nuestras y deja en paz cualquier otra cosa', function () {
-    $source = style_test_image(40, 40);
-    [$name, $stored] = style_test_store($source);
-    $sentinel = dirname(style_photo_dir()) . '/no-tocar.jpg';
-    file_put_contents($sentinel, 'x');
-    try {
-        style_photos_delete([$name, '../no-tocar.jpg', null, 42]);
-        falsy(is_file($stored), 'la foto se ha borrado');
-        truthy(is_file($sentinel), 'el fichero de fuera sigue ahí');
-    } finally { @unlink($source); @unlink($stored); @unlink($sentinel); }
+test('los campos vacíos no llegan como claves', function () {
+    // Un color vacío es una clave y un null que el modelo tiene que leer para nada.
+    $input = style_reading_input([style_test_outfit('Outfit 1', [['name' => 'Vaqueros', 'category' => GARMENT_BOTTOM, 'color' => '', 'notes' => '   ']])]);
+    same(['name', 'category'], array_keys($input['outfits'][0]['garments'][0]));
 });
 
-describe('style_photos_of_user()');
-
-test('encuentra solo las de esa cuenta', function () {
-    $source = style_test_image(40, 40);
-    [$mias, $ruta1] = style_test_store($source, 999001);
-    [, $ruta2] = style_test_store($source, 999002);
-    try {
-        $encontradas = style_photos_of_user(999001);
-        same([$mias], $encontradas, 'ni una de la otra cuenta');
-    } finally { @unlink($source); @unlink($ruta1); @unlink($ruta2); }
+test('las notas se recortan a lo que se paga por ellas', function () {
+    $input = style_reading_input([style_test_outfit('Outfit 1', [['name' => 'x', 'notes' => str_repeat('a', STYLE_READING_NOTES_MAX_LENGTH + 80)]])]);
+    same(STYLE_READING_NOTES_MAX_LENGTH, mb_strlen($input['outfits'][0]['garments'][0]['notes']));
 });
 
-describe('style_photos_purge()');
-
-test('se lleva lo que ningún job va a leer ya y respeta lo reciente', function () {
-    $source = style_test_image(40, 40);
-    [, $vieja] = style_test_store($source, 999003);
-    [, $nueva] = style_test_store($source, 999004);
-    touch($vieja, time() - (STYLE_PHOTO_RETENTION_HOURS + 1) * 3600);
-    try {
-        truthy(style_photos_purge() >= 1, 'ha borrado al menos una');
-        falsy(is_file($vieja), 'la caducada ya no está');
-        truthy(is_file($nueva), 'la de hace un momento sigue');
-    } finally { @unlink($source); @unlink($vieja); @unlink($nueva); }
+test('un outfit sin prendas no se envía vacío', function () {
+    $input = style_reading_input([style_test_outfit('Outfit 1', []), style_test_outfit('Outfit 2', [['name' => 'Botas']])]);
+    same(1, count($input['outfits']));
+    same('Outfit 2', $input['outfits'][0]['name']);
 });
 
-describe('style_photo_format()');
-
-test('un fichero que no es una imagen no pasa', function () {
-    $file = (string) tempnam(sys_get_temp_dir(), 'styletest');
-    file_put_contents($file, 'esto es texto, no una foto');
-    try { same(null, style_photo_format($file)); }
-    finally { @unlink($file); }
-});
-
-test('el formato sale de los bytes, no del nombre', function () {
-    $source = style_test_image(40, 40, 'png');
-    $renamed = $source . '.jpg';
-    rename($source, $renamed);
-    try { same('image/png', style_photo_format($renamed), 'se llama .jpg pero es un PNG'); }
-    finally { @unlink($renamed); }
-});
-
-describe('style_reading_input()');
-
-test('la nota se recorta al máximo que se envía al modelo', function () {
-    $input = style_reading_input([], str_repeat('a', STYLE_NOTE_MAX_LENGTH + 50));
-    same(STYLE_NOTE_MAX_LENGTH, mb_strlen($input['note']));
-});
-
-test('la nota se limpia por los extremos', function () {
-    same('sin abrigos', style_reading_input([], "  sin abrigos \n")['note']);
-});
-
-test('solo viajan nombres de fichero, y con las claves seguidas', function () {
-    $input = style_reading_input(['a.jpg', null, 7, 'b.jpg'], '');
-    same(['a.jpg', 'b.jpg'], $input['photos']);
+test('nunca se envían más de los dos que pide la bienvenida', function () {
+    // Cada uno se paga en tokens de entrada, y readStyle() está escrito alrededor de dos.
+    $muchos = array_fill(0, 6, style_test_outfit('Outfit', [['name' => 'Camisa']]));
+    same(ONBOARDING_OUTFITS, count(style_reading_input($muchos)['outfits']));
 });
 
 describe('style_reading_result() · lo que se guarda del veredicto');
@@ -223,19 +88,25 @@ test('se queda con las claves del perfil y con el resumen', function () {
         'style' => 'Minimalista',
         'colors' => 'Tonos tierra',
         'occasions' => 'Oficina',
-        'avoid' => '',
+        'avoid' => 'Estampados',
         'sizes' => 'M',
         'inventado' => 'no deberia llegar',
     ]);
-    same(['summary', 'style', 'colors', 'occasions'], array_keys($result), 'ni avoid vacío, ni sizes, ni claves de fuera');
+    same(['summary', 'style', 'colors', 'occasions'], array_keys($result), 'ni sizes ni claves de fuera');
     same('Vistes sobrio y cómodo.', $result['summary']);
+});
+
+test('avoid no se acepta ni cuando el modelo lo manda', function () {
+    // Que algo no salga en dos outfits no es prueba de que no guste, y avoid es el campo que
+    // decide lo que el estilista no volverá a proponer.
+    falsy(isset(style_reading_result(['style' => 'Casual', 'avoid' => 'Estampados'])['avoid']));
 });
 
 test('un campo que el estilista no pudo deducir no llega relleno', function () {
     // Es la mitad del diseño: el formulario tiene que quedarse vacío ahí, no con un invento.
-    $result = style_reading_result(['summary' => 'x', 'style' => 'Casual', 'colors' => '', 'occasions' => '', 'avoid' => '']);
+    $result = style_reading_result(['summary' => 'x', 'style' => 'Casual', 'colors' => '', 'occasions' => '']);
     falsy(isset($result['colors']), 'colors vacío no se guarda');
-    falsy(isset($result['avoid']), 'avoid vacío tampoco');
+    falsy(isset($result['occasions']));
 });
 
 test('sin resumen no se inventa la clave', function () {
@@ -244,6 +115,46 @@ test('sin resumen no se inventa la clave', function () {
 
 test('el resumen se recorta como cualquier otro texto guardado', function () {
     same(STYLE_PROFILE_MAX_LENGTH, mb_strlen(style_reading_result(['summary' => str_repeat('a', STYLE_PROFILE_MAX_LENGTH + 100)])['summary']));
+});
+
+describe('latest_style_reading() · de dónde se reanuda el panel');
+
+test('sin lecturas no hay nada que reanudar', function () {
+    $pdo = fresh_style_jobs();
+    same(null, latest_style_reading($pdo, seed_style_user($pdo)));
+});
+
+test('devuelve la última y con el resultado ya decodificado', function () {
+    $pdo = fresh_style_jobs();
+    $id = seed_style_user($pdo);
+    seed_style_reading($pdo, $id, 3, 'failed');
+    $ultima = seed_style_reading($pdo, $id, 1, 'completed', '{"summary":"Vistes sobrio."}');
+    $reading = latest_style_reading($pdo, $id);
+    same($ultima, $reading['id']);
+    same('Vistes sobrio.', $reading['result']['summary']);
+    falsy(isset($reading['result_json']), 'el JSON crudo no viaja al navegador');
+});
+
+test('no devuelve la lectura de otra cuenta', function () {
+    $pdo = fresh_style_jobs();
+    $mio = seed_style_user($pdo);
+    seed_style_reading($pdo, seed_style_user($pdo), 1);
+    same(null, latest_style_reading($pdo, $mio));
+});
+
+describe('style_reading_queue()');
+
+test('encola la lectura con la instantánea de los outfits', function () {
+    $pdo = fresh_style_jobs();
+    $id = seed_style_user($pdo);
+    $jobId = style_reading_queue($pdo, $id, [style_test_outfit('Outfit 1', [['name' => 'Camisa fluida', 'category' => GARMENT_TOP]])]);
+    truthy($jobId > 0, 'devuelve el id de la fila que acaba de escribir');
+    $stmt = $pdo->prepare('SELECT type,status,input_json FROM jobs WHERE id=?');
+    $stmt->execute([$jobId]);
+    $job = $stmt->fetch();
+    same('style_reading', $job['type']);
+    same('queued', $job['status']);
+    same('Camisa fluida', json_decode($job['input_json'], true)['outfits'][0]['garments'][0]['name']);
 });
 
 describe('style_reading_retry_after() · lecturas por día');
@@ -281,7 +192,7 @@ test('fuera de la ventana de un día ya no cuentan', function () {
 });
 
 test('las lecturas fallidas no gastan cupo', function () {
-    // Se le borraron las fotos igual, así que cobrárselas la dejaría sin poder reintentar.
+    // La persona no se llevó nada, y cobrárselas la dejaría sin poder reintentar.
     $pdo = fresh_style_jobs();
     $id = seed_style_user($pdo);
     seed_style_reading($pdo, $id, 1, 'failed');

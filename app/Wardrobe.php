@@ -18,6 +18,33 @@ declare(strict_types=1);
  */
 
 /**
+ * The categories a garment may be filed under, and the only ones.
+ *
+ * They used to live in the <select> of the form and nowhere else, which was fine while
+ * nothing read them back. It is not fine now: outfit_missing() decides whether a look is
+ * complete by comparing against these exact strings, so a garment filed as "Zapatos" would
+ * be a pair of shoes that never completes anything. Named here, checked on the way in, and
+ * the form and the filter are both printed from this list, so the three cannot drift apart.
+ */
+const GARMENT_CATEGORIES = ['Partes de arriba', 'Partes de abajo', 'Vestidos', 'Abrigos', 'Calzado', 'Accesorios'];
+
+/**
+ * The four of them that other code has to name, rather than repeat as strings.
+ *
+ * outfit_missing() decides whether a look is wearable by asking for these, and
+ * label_category() answers with them when it recognises a scanned product. Abrigos and
+ * Accesorios are not here because nothing reasons about them: they are things a look may have
+ * and is never incomplete without.
+ */
+const GARMENT_TOP = 'Partes de arriba';
+const GARMENT_BOTTOM = 'Partes de abajo';
+const GARMENT_DRESS = 'Vestidos';
+const GARMENT_SHOES = 'Calzado';
+
+/** The brands this app knows how to shop for. Inditex first, as the landing says. */
+const GARMENT_BRANDS = ['Zara', 'Massimo Dutti', 'Bershka', 'Pull&Bear', 'Stradivarius', 'Oysho', 'Lefties'];
+
+/**
  * The size to offer per category: the most recent one this person actually used there.
  *
  * Read in ascending id order so the newest row is the one left standing. Categories with

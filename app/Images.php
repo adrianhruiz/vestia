@@ -44,49 +44,6 @@ function store_garment_image(string $source, string $mime, string $directory, st
 }
 
 /**
- * Size a photo of a person is reduced to before the stylist reads it. Above 1024 px the
- * model sees nothing it did not already see -- it works from a downscaled copy of anything
- * larger anyway -- and this file travels to the API as base64 inside the request body, where
- * every pixel is paid for twice: in bandwidth and in input tokens.
- */
-const STYLE_PHOTO_MAX_SIDE = 1024;
-const STYLE_PHOTO_QUALITY = 82;
-
-/**
- * Writes the copy of an uploaded photo that the stylist will read, as $directory/$name.
- * Throws if it cannot be decoded or written.
- *
- * JPEG rather than the WebP the wardrobe stores, because nothing ever displays this one: its
- * only reader is the API, and JPEG is what every vision endpoint has accepted since the
- * first of them. Re-encoding also drops the EXIF block whole, which on a photo somebody took
- * of themselves is where the coordinates of their house are.
- */
-function store_style_photo(string $source, string $mime, string $directory, string $name): void {
-    $original = @imagecreatefromstring((string) file_get_contents($source));
-    if ($original === false) throw new RuntimeException('No se pudo decodificar la imagen.');
-    if ($mime === 'image/jpeg') $original = apply_exif_orientation($original, $source);
-    imagepalettetotruecolor($original);
-
-    $resized = scale_within($original, STYLE_PHOTO_MAX_SIDE);
-    // JPEG has no alpha, and GD fills what it cannot keep with black: a cut-out PNG saved
-    // straight from here would reach the stylist as a silhouette. Flattening onto white
-    // gives it the background such an image was drawn against.
-    $flat = imagecreatetruecolor(imagesx($resized), imagesy($resized));
-    imagefill($flat, 0, 0, imagecolorallocate($flat, 255, 255, 255));
-    imagecopy($flat, $resized, 0, 0, 0, 0, imagesx($resized), imagesy($resized));
-
-    try {
-        if (!imagejpeg($flat, $directory . '/' . $name, STYLE_PHOTO_QUALITY)) {
-            throw new RuntimeException('No se pudo guardar la imagen.');
-        }
-    } finally {
-        imagedestroy($flat);
-        if ($resized !== $original) imagedestroy($resized);
-        imagedestroy($original);
-    }
-}
-
-/**
  * Public path of the grid-sized copy of $path, or null when there is no such file. Seed
  * assets ship their -thumb.webp next to the full-size one, so the seeds can fill thumb_path
  * without knowing how each image was produced.

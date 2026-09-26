@@ -9,9 +9,7 @@ $('#auth-form')?.addEventListener('submit',async e=>{e.preventDefault();const f=
 $('#logout')?.addEventListener('click',async()=>{await api('/api/logout',{method:'POST'});location.reload()});
 if(document.body.dataset.auth==='1'){
  let activeJob=null,pollTimer=null,polling=false,garmentCache=[],resultJobId=null,lastResult=null,shares={};
- // Arriving from a shared look and registering lands on an empty wardrobe, which is the
- // worst possible answer to someone who has just decided they want this.
- if(new URLSearchParams(location.search).has('nueva-prenda')){openModal('#garment-modal');history.replaceState(null,'','/')}
+ let onboarding=window.APP.onboarding||null;
  // An analysis takes one to three minutes. Polling it at a flat 2.5s meant ~50 requests
  // per run, so back off towards 10s, stop while the tab is in the background, and give up
  // rather than poll a job that is never going to answer.
@@ -29,10 +27,32 @@ if(document.body.dataset.auth==='1'){
   sizeInput.placeholder=remembered?remembered:'¿Qué talla usas en esta categoría?'
  };
  categorySelect.addEventListener('change',suggestSize);
- $('#add-garment').onclick=()=>{suggestSize();openModal('#garment-modal')};$('#scan-label').onclick=()=>{suggestSize();$('#garment-modal').hidden=false;$('input[name=image]',$('#garment-form')).click();toast('Fotografía la etiqueta y escribe la referencia visible')};
- const imageInput=$('input[name=image]',$('#garment-form')),preview=$('.upload-preview',$('#garment-form'));let previewUrl='';
+ // Opening the form is one function because it has three callers -- the button, the
+ // "escanear etiqueta" shortcut and the welcome panel's slots -- and two of them arrive with
+ // something already decided: the category the slot was asking for, or the look to join.
+ const openGarmentForm=(outfitId='',category='')=>{
+  garmentForm.reset();clearPreview();resetLinkBox();
+  $('[name=outfit_id]',garmentForm).value=outfitId;
+  if(category)categorySelect.value=category;
+  suggestSize();openModal('#garment-modal')
+ };
+ $('#add-garment').onclick=()=>openGarmentForm();
+ $('#add-from-shop').onclick=()=>{openGarmentForm();linkInput.focus()};
+ const imageInput=$('input[name=image]',garmentForm),preview=$('.upload-preview',garmentForm);let previewUrl='';
+ const clearPreview=()=>{if(previewUrl)URL.revokeObjectURL(previewUrl);previewUrl='';preview.src='';preview.hidden=true;$('.dropzone b').textContent='＋ Añadir foto'};
  imageInput.addEventListener('change',()=>{if(previewUrl)URL.revokeObjectURL(previewUrl);const file=imageInput.files[0];previewUrl=file?URL.createObjectURL(file):'';preview.src=previewUrl;preview.hidden=!file;$('.dropzone b').textContent=file?'Cambiar foto':'＋ Añadir foto'});
- $('#garment-form').addEventListener('submit',async e=>{e.preventDefault();const err=$('.form-error',e.currentTarget);err.textContent='';try{await api('/api/garments',{method:'POST',body:new FormData(e.currentTarget)});if(sizeInput.value.trim())rememberedSizes[categorySelect.value]=sizeInput.value.trim();e.currentTarget.reset();if(previewUrl)URL.revokeObjectURL(previewUrl);previewUrl='';preview.hidden=true;$('.dropzone b').textContent='＋ Añadir foto';$('#garment-modal').hidden=true;toast('Prenda añadida a tu armario');loadGarments()}catch(x){err.textContent=x.message}});
+ garmentForm.addEventListener('submit',async e=>{
+  e.preventDefault();const err=$('.form-error',e.currentTarget);err.textContent='';
+  try{
+   const d=await api('/api/garments',{method:'POST',body:new FormData(e.currentTarget)});
+   if(sizeInput.value.trim())rememberedSizes[categorySelect.value]=sizeInput.value.trim();
+   e.currentTarget.reset();clearPreview();resetLinkBox();$('#garment-modal').hidden=true;
+   toast('Prenda añadida a tu armario');await loadGarments();
+   // The server did the joining, so the panel is repainted from what it answered rather than
+   // from a second request that could disagree with it.
+   if(d.onboarding)applyOnboarding(d)
+  }catch(x){err.textContent=x.message}
+ });
  const renderGarments=items=>{garmentCache=items;$('#garment-count').textContent=`${items.length} ${items.length===1?'prenda':'prendas'} en tu colección`;$('#garment-grid').innerHTML=items.length?items.map(g=>`<article class="garment"><button class="delete-item" data-delete="${g.id}" aria-label="Eliminar">×</button><div class="garment-image">${thumbOf(g)?`<img src="${safeAssetUrl(thumbOf(g))}" alt="${esc(g.name)}" loading="lazy" decoding="async">`:`<span class="garment-placeholder">${garmentIcon(g.category)}</span>`}</div><div class="garment-body"><span class="garment-brand">${esc(g.brand)}</span><h2>${esc(g.name)}</h2><div class="garment-meta">${esc([g.color,g.size,g.reference,g.price_note].filter(Boolean).join(' · '))}</div>${g.source_url?`<a class="product-source" href="${safeUrl(g.source_url)}" target="_blank" rel="noopener noreferrer">Ver producto real ↗</a>`:''}</div></article>`).join(''):'<div class="empty"><b>Tu armario está esperando</b><p>Añade la primera prenda con una foto o su referencia.</p></div>';$$('[data-delete]').forEach(b=>b.onclick=async()=>{if(confirm('¿Eliminar esta prenda?')){await api('/api/garments/'+b.dataset.delete,{method:'DELETE'});loadGarments()}})};
  const loadGarments=async()=>{const q=encodeURIComponent($('#search').value),cat=encodeURIComponent($('#category-filter').value);renderGarments((await api(`/api/garments?q=${q}&category=${cat}`)).items)};
  let searchTimer;$('#search').oninput=()=>{clearTimeout(searchTimer);searchTimer=setTimeout(loadGarments,250)};$('#category-filter').onchange=loadGarments;
@@ -157,72 +177,174 @@ if(document.body.dataset.auth==='1'){
    delete shares[sharing.index];sharing=null;$('#share-modal').hidden=true;toast('El enlace ya no funciona');renderResult(lastResult)}
   catch(x){$('.form-error',$('#share-modal')).textContent=x.message}
  });
+ // ---- A link to the shop ------------------------------------------------------------
+ // The product page already answers eight of the nine boxes below, so pasting its link is the
+ // fast way to add a garment and the photo is the way that always works.
+ //
+ // This was going to be a scan of the tag's QR, and the tag turned out not to carry one yet:
+ // what it has is an EAN barcode, the printed reference and the size as text, and the group's
+ // own item-level tech is RFID, which no phone camera reads. Nothing here decodes anything
+ // until that is settled -- app/ProductLink.php says what is known and where a reader would
+ // plug in.
+ const linkInput=$('#link-url'),linkLead=$('#link-lead');
+ const LINK_LEAD=linkLead.textContent;
+ const resetLinkBox=()=>{linkInput.value='';$('#link-sizes').innerHTML='';linkLead.textContent=LINK_LEAD};
+ $('#link-fetch').onclick=()=>fillFromLink(linkInput.value);
+ linkInput.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();fillFromLink(linkInput.value)}});
+ async function fillFromLink(url){
+  linkLead.textContent='Buscando esa prenda…';
+  try{
+   const {garment}=await api('/api/product-link',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url})});
+   for(const [name,value] of Object.entries(garment)){
+    if(name==='sizes')continue;
+    const field=$(`[name="${name}"]`,garmentForm);
+    if(field&&value)field.value=value
+   }
+   // Every size the product is sold in, so the box offers them instead of asking: the tag
+   // prints the size as text and no link carries it.
+   $('#link-sizes').innerHTML=(garment.sizes||[]).map(size=>`<option value="${esc(size)}">`).join('');
+   suggestSize();
+   linkLead.textContent=garment.name
+    ?`${garment.brand} · ${garment.name}. Compruébalo y guarda.`
+    :`Ficha de ${garment.brand}. No tengo esta prenda en el catálogo, así que el nombre lo pones tú.`
+  }catch(x){linkLead.textContent=x.message}
+ }
+
+ // ---- The welcome, inside the wardrobe -----------------------------------------------
+ // Two complete outfits, and then the stylist reads them. It is painted from the state the
+ // server sends -- which outfits exist, what each one is still missing, and how the reading is
+ // going -- so what counts as a wearable look is decided in outfit_missing() and nowhere else.
+ const SLOT_ASKS={'Partes de arriba':'una parte de arriba','Partes de abajo':'una parte de abajo','Calzado':'el calzado'};
+ const READING_GIVE_UP=5*60*1000;
+ let readingWatched=null,readingTimer=null;
+ const applyOnboarding=answer=>{onboarding=answer.onboarding||null;renderOnboarding()};
+
+ const slotOptions=(outfit,category)=>{
+  const taken=new Set((outfit.garments||[]).map(g=>Number(g.id)));
+  return (onboarding.wardrobe||[]).filter(g=>g.category===category&&!taken.has(Number(g.id)))
+   .map(g=>`<option value="${g.id}">${esc(g.name)}</option>`).join('')
+ };
+ // One control per empty slot, offering what is already in the wardrobe before offering to add
+ // something: the second outfit is usually made of clothes that are in there already.
+ const outfitSlot=(outfit,category)=>`<li class="outfit-slot"><select data-slot="${outfit.id}" data-category="${esc(category)}"><option value="">Falta ${esc(SLOT_ASKS[category]||category.toLowerCase())}…</option>${slotOptions(outfit,category)}<option value="new">＋ Añadir una prenda nueva</option></select></li>`;
+ const outfitCard=outfit=>`<article class="outfit-builder${outfit.complete?' is-complete':''}"><h3>${esc(outfit.name)}<em>${outfit.complete?'Completo ✓':`Faltan ${outfit.missing.length} ${outfit.missing.length===1?'prenda':'prendas'}`}</em></h3><ul>${(outfit.garments||[]).map(g=>`<li class="outfit-piece"><span>${esc(g.name)}</span><small>${esc(g.category)}</small><button type="button" class="delete-item" data-unlink="${outfit.id}:${g.id}" aria-label="Quitar de este outfit">×</button></li>`).join('')}${outfit.missing.map(category=>outfitSlot(outfit,category)).join('')}</ul><button type="button" class="text-btn" data-add-to="${outfit.id}">＋ Añadir otra prenda (abrigo, accesorio…)</button></article>`;
+
+ function renderOnboarding(){
+  const panel=$('#onboarding-panel');
+  if(!panel)return;
+  if(!onboarding){panel.hidden=true;return}
+  panel.hidden=false;
+  const reading=onboarding.reading;
+  if(reading&&['queued','processing'].includes(reading.status)){
+   panel.innerHTML=`<span class="eyebrow">PASO 2 DE 2</span><h2>Estoy mirando tus outfits.</h2><div class="progress"><i style="width:${Math.max(10,reading.progress)}%"></i></div><p class="onboarding-lead">${esc(reading.phase||'Preparando la lectura…')}</p>`;
+   watchReading(reading.id);return
+  }
+  if(reading&&reading.status==='completed'){
+   panel.innerHTML=`<span class="eyebrow">PASO 2 DE 2</span><h2>Ya tengo tu perfil de estilo.</h2><p class="onboarding-lead">${esc(reading.result?.summary||'Léelo, corrígelo si no te reconoces y guárdalo.')}</p><button class="btn btn-coral" id="reading-open">Ver y guardar mi perfil</button>`;
+   $('#reading-open').onclick=()=>openReading(reading.result||{});
+   return
+  }
+  const failed=reading&&['failed','cancelled'].includes(reading.status);
+  panel.innerHTML=`<span class="eyebrow">PASO 1 DE 2</span><h2>Monta dos outfits que te pondrías.</h2><p class="onboarding-lead">Cada uno necesita parte de arriba, parte de abajo y calzado —o un vestido con su calzado—. Cuando los dos estén completos, el estilista los mira y escribe tu perfil de estilo por ti.</p>${failed?`<p class="form-error">${esc(reading.error||'No he podido leer esos outfits.')}</p>`:''}<div class="outfit-builders">${onboarding.outfits.map(outfitCard).join('')}</div>${onboarding.hint?`<p class="onboarding-hint">${esc(onboarding.hint)}</p>`:''}${onboarding.ready?`<button class="btn btn-coral" id="reading-start">${failed?'Volver a leer mi estilo':'Que el estilista lea mi estilo'}</button>`:''}`;
+  $$('[data-unlink]',panel).forEach(button=>button.onclick=async()=>{
+   const [outfitId,garmentId]=button.dataset.unlink.split(':');
+   try{applyOnboarding(await api(`/api/outfits/${outfitId}/garments/${garmentId}`,{method:'DELETE'}))}catch(x){toast(x.message)}
+  });
+  $$('[data-slot]',panel).forEach(select=>select.onchange=async()=>{
+   const chosen=select.value;
+   if(chosen==='new'){select.value='';return openGarmentForm(select.dataset.slot,select.dataset.category)}
+   if(!chosen)return;
+   try{applyOnboarding(await api(`/api/outfits/${select.dataset.slot}/garments`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({garment_id:Number(chosen)})}))}
+   catch(x){select.value='';toast(x.message)}
+  });
+  $$('[data-add-to]',panel).forEach(button=>button.onclick=()=>openGarmentForm(button.dataset.addTo));
+  const start=$('#reading-start');
+  if(start)start.onclick=()=>askForReading(start);
+ }
+
+ async function askForReading(button){
+  const label=button.textContent;button.disabled=true;button.textContent='Pidiendo la lectura…';
+  try{
+   const d=await api('/api/style-reading',{method:'POST'});
+   onboarding.reading={id:d.job_id,status:'queued',progress:5,phase:null,result:null,error:null};
+   renderOnboarding()
+  }catch(x){button.disabled=false;button.textContent=label;toast(x.message)}
+ }
+
+ // Same shape as the analysis poll: back off towards ten seconds, wait rather than give up
+ // while the tab is in the background, and stop rather than poll a job that will never answer.
+ // The bar and the phase are patched in place, because re-rendering the panel from here would
+ // call watchReading() again on every tick.
+ function watchReading(id){
+  if(readingWatched===id)return;
+  readingWatched=id;clearTimeout(readingTimer);
+  pollReading(id,Date.now(),POLL_MIN)
+ }
+ async function pollReading(id,startedAt,delay){
+  if(readingWatched!==id)return;
+  if(document.hidden){readingTimer=setTimeout(()=>pollReading(id,startedAt,delay),POLL_MIN);return}
+  if(Date.now()-startedAt>READING_GIVE_UP){readingWatched=null;toast('La lectura está tardando más de lo normal. Recarga la página para ver cómo va.');return}
+  try{
+   const {job}=await api('/api/jobs/'+id);
+   if(['queued','processing'].includes(job.status)){
+    const bar=$('#onboarding-panel .progress i'),lead=$('#onboarding-panel .onboarding-lead');
+    if(bar)bar.style.width=Math.max(10,job.progress)+'%';
+    if(lead&&job.phase)lead.textContent=job.phase;
+    readingTimer=setTimeout(()=>pollReading(id,startedAt,Math.min(Math.round(delay*POLL_GROWTH),POLL_MAX)),delay);return
+   }
+   readingWatched=null;
+   onboarding.reading={id:job.id,status:job.status,progress:job.progress,phase:job.phase,result:job.result,error:job.error};
+   renderOnboarding();
+   if(job.status==='completed')openReading(job.result||{})
+  }catch(x){readingWatched=null;toast(x.message)}
+ }
+
+ // The verdict, in a form, for the person to correct before any of it is theirs. Whatever the
+ // reading did not answer starts from what is already saved, so accepting this cannot wipe a
+ // line somebody wrote themselves -- "evitar" above all, which no reading ever fills.
+ function openReading(result){
+  const form=$('#reading-form');
+  $('#reading-summary').textContent=result.summary||'Ya tengo una idea de cómo vistes.';
+  $$('input,textarea',form).forEach(field=>{field.value=$(`#profile-form [name="${field.name}"]`)?.value||''});
+  for(const [name,value] of Object.entries(result)){
+   if(name==='summary')continue;
+   const field=$(`[name="${name}"]`,form);
+   if(field)field.value=value
+  }
+  $('.form-error',form).textContent='';
+  openModal('#reading-modal')
+ }
+ $('#reading-form')?.addEventListener('submit',async e=>{
+  e.preventDefault();const err=$('.form-error',e.currentTarget);err.textContent='';
+  try{
+   // finish is what closes the welcome. Nothing else does, so a profile written by hand on day
+   // one does not cost somebody the reading they were promised.
+   await api('/api/profile',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...Object.fromEntries(new FormData(e.currentTarget)),finish:true})});
+   location.reload()
+  }catch(x){err.textContent=x.message}
+ });
+ // Redoing the reading from "Mi estilo", for an account whose welcome is long behind it. A
+ // style changes, and there is no panel to watch in that case, so the button is the progress.
+ //
+ // It can also be pressed by somebody who has never grouped a look -- every account that
+ // existed before outfits did. Refusing with a sentence about two outfits and no way to build
+ // them would be a dead end, so the panel that builds them is brought back for the occasion.
+ $('#reread-style')?.addEventListener('click',async()=>{
+  const button=$('#reread-style'),label=button.textContent;
+  button.disabled=true;button.textContent='Leyendo tus outfits…';
+  try{
+   const d=await api('/api/style-reading',{method:'POST'});
+   await waitForJob(d.job_id);
+   const {job}=await api('/api/jobs/'+d.job_id);
+   openReading(job.result||{})
+  }catch(x){
+   toast(x.message);
+   try{applyOnboarding(await api('/api/outfits'));switchView('wardrobe')}catch{}
+  }
+  finally{button.disabled=false;button.textContent=label}
+ });
+ renderOnboarding();
  loadJobs();
 }
 function esc(v=''){const d=document.createElement('div');d.textContent=String(v);return d.innerHTML}function safeUrl(u=''){try{const x=new URL(u);return x.protocol==='https:'?x.href:'#'}catch{return '#'}}function safeAssetUrl(u=''){try{const x=new URL(u,location.origin);return x.origin===location.origin?x.href:'#'}catch{return '#'}}function thumbOf(g){return g?.thumb_path||g?.image_path||''}function garmentIcon(category=''){return {'Partes de arriba':'♙','Partes de abajo':'♜','Vestidos':'♕','Abrigos':'♖','Calzado':'♢','Accesorios':'○'}[category]||'♧'}
 
-// The welcome at /bienvenida. Three steps in one page -- photos, the wait, the verdict --
-// because a reading takes half a minute and a page that navigates twice in that time feels
-// like something went wrong.
-if(document.body.dataset.onboarding==='1'){
- const show=id=>$$('.onboarding-step').forEach(s=>s.hidden=s.id!==id);
- const urls=new Map();
- $$('.style-slot').forEach(slot=>{
-  const input=$('input',slot),preview=$('img',slot),label=$('b',slot);
-  input.addEventListener('change',()=>{
-   if(urls.has(input))URL.revokeObjectURL(urls.get(input));
-   const file=input.files[0];
-   if(file)urls.set(input,URL.createObjectURL(file));else urls.delete(input);
-   preview.src=file?urls.get(input):'';preview.hidden=!file;label.textContent=file?'Cambiar':'＋ Foto'
-  })
- });
- $('#onboarding-skip').onclick=async()=>{try{await api('/api/onboarding/skip',{method:'POST'});location.assign(window.APP.next)}catch(x){toast(x.message)}};
-
- // Same shape as the analysis poll: back off towards ten seconds, stop while the tab is in
- // the background, and give up rather than poll a job that is never going to answer.
- const POLL_MIN=2000,POLL_MAX=10000,POLL_GROWTH=1.4,POLL_GIVE_UP=5*60*1000;
- let pollDelay=POLL_MIN,startedAt=0,timer=null;
- const fail=message=>{clearTimeout(timer);show('step-photos');$('.form-error',$('#style-form')).textContent=message};
- const fill=result=>{
-  $('#reading-summary').textContent=result.summary||'Ya tengo una idea de cómo vistes.';
-  for(const [name,value] of Object.entries(result)){const field=$(`[name="${name}"]`,$('#onboarding-profile'));if(field)field.value=value}
-  show('step-profile')
- };
- async function poll(id){
-  if(document.hidden)return timer=setTimeout(()=>poll(id),POLL_MIN);
-  if(Date.now()-startedAt>POLL_GIVE_UP)return fail('La lectura está tardando más de lo normal. Vuelve a intentarlo.');
-  try{
-   const {job}=await api('/api/jobs/'+id);
-   if(job.phase)$('#reading-phase').textContent=job.phase;
-   $('.progress i',$('#step-reading')).style.width=Math.max(10,job.progress)+'%';
-   if(job.status==='completed')return fill(job.result||{});
-   if(job.status==='failed'||job.status==='cancelled')return fail(job.error||'No he podido leer esas fotos. Prueba con otras.');
-   pollDelay=Math.min(Math.round(pollDelay*POLL_GROWTH),POLL_MAX);
-   timer=setTimeout(()=>poll(id),pollDelay)
-  }catch(x){fail(x.message)}
- }
-
- $('#style-form').addEventListener('submit',async e=>{
-  e.preventDefault();
-  const err=$('.form-error',e.currentTarget);err.textContent='';
-  const body=new FormData();
-  // An empty slot is a slot nobody filled: sending it would be an upload error the person
-  // never made.
-  $$('.style-slot input').forEach(input=>{if(input.files[0])body.append('photos[]',input.files[0])});
-  if(!body.has('photos[]'))return err.textContent='Sube al menos una foto, o elige «Lo haré luego».';
-  body.append('note',$('[name=note]',e.currentTarget).value);
-  try{
-   const d=await api('/api/style-reading',{method:'POST',body});
-   show('step-reading');pollDelay=POLL_MIN;startedAt=Date.now();poll(d.job_id)
-  }catch(x){err.textContent=x.message}
- });
-
- $('#onboarding-profile').addEventListener('submit',async e=>{
-  e.preventDefault();
-  const err=$('.form-error',e.currentTarget);err.textContent='';
-  try{
-   await api('/api/profile',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.fromEntries(new FormData(e.currentTarget)))});
-   location.assign(window.APP.next)
-  }catch(x){err.textContent=x.message}
- });
-}

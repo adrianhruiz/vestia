@@ -2,22 +2,17 @@
 declare(strict_types=1);
 
 /**
- * The welcome: the screen that stands between registering and an empty wardrobe.
+ * The welcome: what is still owed to an account that has just been created.
  *
- * Registration used to hand back a session and drop the person on a grid with nothing in it,
- * and the style profile -- six empty boxes under "Mi estilo" -- was the second thing they
- * were asked to do on their own. Nobody did it, so the stylist worked from the clothes alone.
+ * It used to be a page of its own at /bienvenida, which asked for photographs and stood
+ * between registering and the product. Both are gone. Registering now ends in the wardrobe,
+ * and the welcome is a panel inside it that asks for two complete outfits (app/Outfits.php)
+ * and, once they exist, reads them.
  *
- * Here it is the other way round: show it photos, and it writes the profile. What comes back
- * is never saved behind anybody's back -- it lands in the form, filled in, for the person to
- * correct and save. A machine describing your style from your photograph and being half
- * right, with no way to argue, is a bad first thing to happen to you.
- *
- * It can always be refused. "Lo haré luego" is as complete an answer as finishing it: a wall
- * between signing up and the product is worth less than the profile it would extract.
+ * All that is left here is the flag: whether this account has been through that yet. It is
+ * read to decide whether the panel is painted, and written once, when the person accepts the
+ * profile the reading wrote for them.
  */
-
-const ONBOARDING_PATH = '/bienvenida';
 
 /** Whether the welcome is still owed to this account. */
 function onboarding_pending(?array $user): bool {
@@ -25,7 +20,7 @@ function onboarding_pending(?array $user): bool {
 }
 
 /**
- * Writes down that the welcome is behind them, whether they finished it or waved it away.
+ * Writes down that the welcome is behind them.
  *
  * Only ever the first time: the date is when they stopped being new, and somebody redoing
  * their reading a year later has not just registered.
@@ -36,77 +31,57 @@ function onboarding_done(PDO $pdo, int $userId): void {
 }
 
 /**
- * Where somebody goes once the welcome is behind them.
+ * Everything the wardrobe panel needs to paint the welcome, in one answer.
  *
- * Arriving from a shared look and landing on an empty wardrobe is the worst possible answer
- * to someone who has just decided they want this, so that intent survives the welcome and
- * opens the add-garment form on the other side.
- *
- * It travels in the query string, which means it is written by whoever is asking: this
- * returns one of two paths it chose itself and never the value it was given, so no request
- * can turn the end of registration into a redirect somewhere else.
+ * The looks come first because they are what is being asked for, and the reading comes with
+ * them because the panel has to be able to resume: somebody who reloads the page while the
+ * stylist is working, or who comes back to a finished reading they never accepted, has to find
+ * the same screen they left. Nothing about that state lives in the browser.
  */
-function onboarding_next_path(string $after): string {
-    return $after === 'nueva-prenda' ? '/?nueva-prenda=1' : '/';
+function onboarding_state(PDO $pdo, int $userId): array {
+    $outfits = onboarding_outfits($pdo, $userId);
+    // What each look is still missing is decided here and not in the browser, so the rule for
+    // a wearable outfit lives in outfit_missing() and nowhere else. The panel paints what it
+    // is told.
+    foreach ($outfits as $index => $outfit) {
+        $outfits[$index]['missing'] = outfit_missing(outfit_categories($outfit));
+        $outfits[$index]['complete'] = $outfits[$index]['missing'] === [];
+    }
+    // Every garment that could fill a slot, by the three fields a slot shows. The page already
+    // ships the wardrobe, but it ships whatever the grid is currently filtered to, and a
+    // <select> that is missing the trousers because somebody typed in the search box would be
+    // a bug nobody could see happening.
+    $stmt = $pdo->prepare('SELECT id,name,category FROM garments WHERE user_id=? ORDER BY created_at DESC, id DESC');
+    $stmt->execute([$userId]);
+    $wardrobe = array_map(static fn(array $row): array => ['id' => (int) $row['id']] + $row, $stmt->fetchAll());
+
+    return [
+        'outfits' => $outfits,
+        'wardrobe' => $wardrobe,
+        'ready' => outfits_ready($outfits),
+        'hint' => outfits_hint($outfits),
+        'reading' => latest_style_reading($pdo, $userId),
+    ];
 }
 
-/** The welcome screen. Reachable whenever there is a session, finished or not. */
-function render_onboarding_page(array $user, string $after): never {
-    $next = onboarding_next_path($after);
-    http_response_code(200);
-    header('Content-Type: text/html; charset=utf-8');
-    ?><!doctype html>
-<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#183f36">
-<?php // Nothing here is for a stranger, and there is nothing to index. ?>
-<meta name="robots" content="noindex,nofollow">
-<title>Cuéntale a Vestia cómo vistes</title>
-<link rel="preload" as="font" type="font/woff2" href="/assets/fonts/dm-sans-latin.woff2" crossorigin><link rel="preload" as="font" type="font/woff2" href="/assets/fonts/playfair-display-latin.woff2" crossorigin>
-<link rel="stylesheet" href="<?= asset('/assets/app.css') ?>"></head>
-<body data-onboarding="1">
-<header class="topbar"><a class="brand" href="/"><span>V</span><div class="brand-label">Vestia<small class="app-version">Versión <?= e(trim((string) file_get_contents(APP_ROOT . '/VERSION'))) ?></small></div></a><div><a class="btn btn-ghost" href="<?= e($next) ?>">Ir a mi armario</a></div></header>
+/**
+ * The same state, after a change to the wardrobe that may have been the one that finished it.
+ *
+ * Two complete outfits is the whole ask, so completing the second one is what starts the
+ * reading: nobody should have to go and find a button for the thing they were just asked to
+ * do. Which means this is the one place in the app where a model call is started by something
+ * other than a press, so it is deliberately narrow -- once per account, only while the welcome
+ * is still owed, only when no reading exists yet, and never past the daily limit.
+ *
+ * A reading that failed is not retried here. It would be billed again for the same account
+ * without anybody asking, and the panel has a button for exactly that case.
+ */
+function onboarding_advance(PDO $pdo, array $user): array {
+    $state = onboarding_state($pdo, (int) ($user['id'] ?? 0));
+    if (!$state['ready'] || $state['reading'] !== null || !onboarding_pending($user)) return $state;
+    if (style_reading_retry_after($pdo, $user) !== null) return $state;
 
-<main class="onboarding">
- <section class="onboarding-step" id="step-photos">
-  <span class="eyebrow">PASO 1 DE 2</span>
-  <h1>Enséñame cómo vistes, <?= e(explode(' ', $user['name'])[0]) ?>.</h1>
-  <p class="onboarding-lead">Sube hasta <?= STYLE_PHOTO_MAX_COUNT ?> fotos: tuyas, o de looks que te gusten. Con una basta. El estilista las mira y escribe tu perfil, para que no tengas que rellenarlo tú.</p>
-  <form id="style-form">
-   <div class="style-slots">
-    <?php for ($slot = 0; $slot < STYLE_PHOTO_MAX_COUNT; $slot++): ?>
-    <label class="dropzone style-slot"><input type="file" name="photos[]" accept="image/jpeg,image/png,image/webp"><img class="style-preview" alt="" hidden><b>＋ Foto <?= $slot + 1 ?></b><span>JPG, PNG o WebP</span></label>
-    <?php endfor ?>
-   </div>
-   <label class="style-note">¿Algo más que deba saber?<textarea name="note" maxlength="<?= STYLE_NOTE_MAX_LENGTH ?>" placeholder="Lo que no te pondrías nunca, tallas raras, presupuesto, para qué vistes cada día…"></textarea><small>Opcional. Lo que escribas aquí es lo único de lo que saldrá «qué evitar»: que algo no salga en tus fotos no significa que no te guste.</small></label>
-   <button class="btn btn-coral full">Que el estilista lea mi estilo</button>
-   <p class="form-error"></p>
-  </form>
-  <p class="onboarding-privacy">Tus fotos se envían al estilista para leer tu estilo y se borran en cuanto termina. No se publican, no se comparten y no aparecen en tu armario.</p>
-  <button class="text-btn" id="onboarding-skip">Lo haré luego</button>
- </section>
-
- <section class="onboarding-step" id="step-reading" hidden>
-  <span class="eyebrow">UN MOMENTO</span>
-  <h1>Estoy mirando tus fotos.</h1>
-  <div class="progress"><i></i></div>
-  <p class="onboarding-lead" id="reading-phase">Preparando la lectura…</p>
- </section>
-
- <section class="onboarding-step" id="step-profile" hidden>
-  <span class="eyebrow">PASO 2 DE 2</span>
-  <h1>Esto es lo que he visto.</h1>
-  <p class="onboarding-lead" id="reading-summary"></p>
-  <p class="onboarding-hint">Cámbialo si no te reconoces: es tu perfil, y el estilista trabajará con lo que quede aquí.</p>
-  <form id="onboarding-profile" class="profile-form">
-   <label>Tu estilo<textarea name="style" placeholder="Minimalista, casual sofisticado, urbano…"></textarea></label>
-   <label>Colores que te gustan<input name="colors" placeholder="Verde, negro, tonos tierra…"></label>
-   <label>Ocasiones frecuentes<input name="occasions" placeholder="Trabajo, fin de semana, cenas…"></label>
-   <label>Evitar<input name="avoid" placeholder="Estampados, prendas ajustadas…"></label>
-   <button class="btn btn-dark">Guardar y entrar en mi armario</button>
-   <p class="form-error"></p>
-  </form>
- </section>
-</main>
-
-<div id="toast" role="status"></div><script>window.APP=<?= json_encode(['csrf' => csrf_token(), 'next' => $next], JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;</script><script src="<?= asset('/assets/app.js') ?>"></script></body></html><?php
-    exit;
+    style_reading_queue($pdo, (int) $user['id'], $state['outfits']);
+    $state['reading'] = latest_style_reading($pdo, (int) $user['id']);
+    return $state;
 }

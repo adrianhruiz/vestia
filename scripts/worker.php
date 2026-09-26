@@ -78,36 +78,31 @@ function run_outfit_image(PDO $pdo, OpenAI $ai, array $job, callable $announce, 
 }
 
 /**
- * The style reading: show the stylist the photos, keep the verdict, destroy the photos.
+ * The style reading: show the stylist two of this person's own outfits, keep the verdict.
  *
- * The deletion is in a finally on purpose. Photos of somebody's face are input, not
- * something this app keeps, and the outcome of the call does not change that: a reading
- * that failed leaves no more reason to hold them than one that worked. It costs a re-upload
- * on the rare retry, which is twenty seconds, and it means there is no path through here
- * that ends with the files still on disk.
+ * Nothing is deleted on the way out any more, and there is no finally clause, because nothing
+ * was uploaded: the looks this reads were snapshotted into input_json when the job was queued
+ * and they stay in the wardrobe afterwards. The verdict is not written to the profile here
+ * either -- it travels back as a result the person accepts or edits first.
  */
 function run_style_reading(PDO $pdo, OpenAI $ai, array $job, callable $announce, callable $stopIfCancelled): array {
     $input = json_decode($job['input_json'], true) ?: [];
-    $names = array_values(array_filter((array) ($input['photos'] ?? []), 'is_string'));
-    $photos = array_values(array_filter(array_map('style_photo_path', $names)));
-    // Everything that deletes them is deliberate, so an empty list means this job already
-    // ran, or its photos aged out waiting for a worker that was not running.
-    if (!$photos) throw new RuntimeException('Las fotos ya no están disponibles. Vuelve a subirlas.');
+    $outfits = array_values(array_filter((array) ($input['outfits'] ?? []), 'is_array'));
+    // The snapshot is written by the endpoint that queues this, so an empty one means the
+    // looks were taken apart between the queue and this line -- or that this job is older
+    // than the outfits it was meant to read.
+    if (!$outfits) throw new RuntimeException('Esos outfits ya no están completos. Vuelve a montarlos y pídeme la lectura otra vez.');
 
     $stopIfCancelled();
-    $announce(count($photos) === 1 ? 'Mirando tu foto' : 'Mirando tus ' . count($photos) . ' fotos', 40);
-    try {
-        $answer = $ai->readStyle($photos, (string) ($input['note'] ?? ''));
-    } finally {
-        style_photos_delete($names);
-    }
+    $announce('Mirando tus ' . count($outfits) . ' outfits', 40);
+    $answer = $ai->readStyle($outfits);
     $stopIfCancelled();
     return style_reading_result($answer);
 }
 
 /** What the bar says before the job has done anything. Each type starts somewhere different. */
 function job_initial_phase(string $type): string {
-    return ['style_reading' => 'Abriendo tus fotos', 'outfit_image' => 'Preparando el lienzo'][$type] ?? 'Leyendo tu armario';
+    return ['style_reading' => 'Abriendo tus outfits', 'outfit_image' => 'Preparando el lienzo'][$type] ?? 'Leyendo tu armario';
 }
 
 $once = in_array('--once', $argv, true);
