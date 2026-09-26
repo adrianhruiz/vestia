@@ -21,12 +21,14 @@ function run_wardrobe_analysis(PDO $pdo, OpenAI $ai, array $job, callable $annou
     // Jobs queued before the shopping flag existed stored the profile flat and always searched.
     $preferences = is_array($input['preferences'] ?? null) ? $input['preferences'] : $input;
     $withShopping = (bool) ($input['shopping'] ?? true);
+    // Jobs queued before the budget moved out of the profile simply have none.
+    $budget = (string) ($input['budget'] ?? '');
     // The wardrobe can have moved between queueing and picking the job up. Record what was
     // really sent, or a later identical request would reuse an answer about other clothes.
     $pdo->prepare('UPDATE jobs SET fingerprint=? WHERE id=?')->execute([analysis_fingerprint($garments, $input), $job['id']]);
     $stopIfCancelled();
     $announce(count($garments) . ' prendas leídas · ' . ($withShopping ? 'buscando combinaciones y compras' : 'buscando combinaciones'), 30);
-    $result = $ai->analyze($garments, $preferences, $withShopping);
+    $result = $ai->analyze($garments, $preferences, $withShopping, $budget);
     $stopIfCancelled();
     return $result;
 }

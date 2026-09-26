@@ -4,7 +4,7 @@ declare(strict_types=1);
 final class OpenAI {
     public function __construct(private string $key) {}
 
-    public function analyze(array $garments, array $preferences, bool $withShopping = true): array {
+    public function analyze(array $garments, array $preferences, bool $withShopping = true, string $budget = ''): array {
         $schema = [
             'type' => 'object', 'additionalProperties' => false,
             'required' => ['summary','palette','gaps','outfits'],
@@ -33,6 +33,9 @@ final class OpenAI {
             ]
         ];
         $shoppingRules = 'Solo cuando falte una pieza, busca productos disponibles en webs oficiales de Zara, Massimo Dutti, Bershka, Pull&Bear, Stradivarius, Oysho o Lefties. No inventes disponibilidad, precio ni URL: si no puedes verificarlo, usa la página de búsqueda oficial y dilo en price_note.';
+        // The budget is about this shopping trip, so it is said with the shopping rules and
+        // not among the things we know about the person.
+        if ($withShopping && $budget !== '') $shoppingRules .= ' El presupuesto para completar un outfit es: ' . $budget . '. No propongas nada que lo pase.';
         $wardrobeOnly = 'Trabaja únicamente con el armario real: no propongas compras y deja shopping vacío en todos los outfits. Sigue indicando en missing_items lo que le falte al armario.';
         $payload = [
             'model' => env('OPENAI_MODEL', 'gpt-5.5'),
