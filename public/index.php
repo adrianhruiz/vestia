@@ -49,7 +49,12 @@ if (str_starts_with($path, '/api/')) {
         if (($taken = $stmt->fetchColumn()) !== false) json_response(['error' => $taken === $email
             ? 'Ese email ya está registrado.'
             : 'Ya hay una cuenta con ese buzón. Las direcciones con +etiqueta o con puntos llegan al mismo sitio: entra con la que usaste al registrarte.'], 409);
-        try { $stmt = $pdo->prepare('INSERT INTO users(name,email,email_canonical,password_hash,style_profile,signup_share_token,created_at) VALUES(?,?,?,?,?,?,?)'); $stmt->execute([$name,$email,$canonical,password_hash($password,PASSWORD_DEFAULT),'{}',$ref,date(DATE_ATOM)]); }
+        // Read here, on the line after the INSERT, and never further down: lastInsertId() is
+        // a property of the connection, not of this statement, so every write that follows
+        // overwrites it. record_signup() below does two -- its own INSERT, then the prune --
+        // and a DELETE leaves it at 0, which is how registering ended up handing out a
+        // session belonging to nobody: logged in as user 0, straight back out of /bienvenida.
+        try { $stmt = $pdo->prepare('INSERT INTO users(name,email,email_canonical,password_hash,style_profile,signup_share_token,created_at) VALUES(?,?,?,?,?,?,?)'); $stmt->execute([$name,$email,$canonical,password_hash($password,PASSWORD_DEFAULT),'{}',$ref,date(DATE_ATOM)]); $userId = (int)$pdo->lastInsertId(); }
         catch (PDOException $e) {
             if (($e->errorInfo[1] ?? 0) === 1062) json_response(['error' => 'Ese email ya está registrado.'], 409);
             error_log('register failed: ' . $e->getMessage());
@@ -57,7 +62,7 @@ if (str_starts_with($path, '/api/')) {
         }
         // Only now: what the limit counts is accounts that exist, not forms that bounced.
         record_signup($pdo, $ipHash, $emailDomain);
-        session_regenerate_id(true); $_SESSION['user_id'] = (int)$pdo->lastInsertId();
+        session_regenerate_id(true); $_SESSION['user_id'] = $userId;
         // Registering ends on the welcome, not on an empty wardrobe. Decided here rather
         // than by the page, because only this side knows whether they came in through a
         // shared look and still owe themselves that first garment.
