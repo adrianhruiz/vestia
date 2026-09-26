@@ -93,11 +93,12 @@ function sql_statements(string $sql): array {
  * analysis request filter through this: whatever reaches the model has to be something we
  * asked for, at a length we chose.
  *
- * Sizes are not among them any more. Every garment carries its own, analysis_garments()
- * already sends it, and one free-text line could never be true for somebody who is a 40 in
- * trousers and an M in shirts. See app/Wardrobe.php for what replaced it.
+ * Two things that used to live here have left, both for the same reason: they are not
+ * properties of a person. Sizes belong to each garment (app/Wardrobe.php), and a budget
+ * belongs to the shopping trip it is for (analysis_budget()). Asked up front, at
+ * registration, both got an answer nobody meant.
  */
-const STYLE_PROFILE_KEYS = ['style', 'colors', 'avoid', 'budget', 'occasions'];
+const STYLE_PROFILE_KEYS = ['style', 'colors', 'avoid', 'occasions'];
 const STYLE_PROFILE_MAX_LENGTH = 500;
 
 /** Keeps only the known keys, as trimmed strings, capped. Anything else is dropped. */
@@ -119,8 +120,9 @@ function style_profile(array ...$sources): array {
  * The profile after a form that is only about part of it.
  *
  * A key the request mentions is taken from the request, empty included, so a field can still
- * be cleared by emptying its box. A key it does not mention at all keeps what it had: the
- * welcome screen asks about some of the profile and must not wipe the parts it never showed.
+ * be cleared by emptying its box. A key it does not mention at all keeps what it had, which
+ * is what lets a screen ask about part of the profile -- the welcome does -- without wiping
+ * the part it never showed.
  */
 function style_profile_update(array $body, array $stored): array {
     return style_profile($body) + style_profile(array_diff_key($stored, $body));

@@ -31,6 +31,25 @@ function analysis_garments(PDO $pdo, int $userId): array {
     return $garments;
 }
 
+/** How much of a budget line the stylist needs. It is a figure and a word, never a paragraph. */
+const ANALYSIS_BUDGET_MAX_LENGTH = 120;
+
+/**
+ * What this person is willing to spend completing a look, or '' when they are not shopping.
+ *
+ * It used to be a box in the style profile, which is the wrong place: "hasta 120 €" is an
+ * answer to what somebody is buying today, not a property of who they are, and asked at
+ * registration -- before there was anything to complete -- it got a number nobody meant.
+ *
+ * Read only when the shopping switch is on. With it off nothing is being bought, so a figure
+ * left over in the form has no business reaching the prompt, and none reaching the
+ * fingerprint either: two runs that differ by an unused number are the same run.
+ */
+function analysis_budget(array $body): string {
+    if (empty($body['shopping'])) return '';
+    return mb_substr(trim((string) ($body['budget'] ?? '')), 0, ANALYSIS_BUDGET_MAX_LENGTH);
+}
+
 /**
  * Bump when the instructions or the schema change enough that an old answer is no longer
  * the answer we would give today, so fingerprints from before stop matching.

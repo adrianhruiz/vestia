@@ -104,11 +104,11 @@ test('lo que el formulario no menciona se queda como estaba', function () {
     // Es justo el caso de la bienvenida: pregunta solo por una parte del perfil.
     $result = style_profile_update(
         ['style' => 'Minimalista', 'colors' => 'Tonos tierra'],
-        ['style' => 'Clásico', 'occasions' => 'Oficina', 'budget' => 'Hasta 120 €']
+        ['style' => 'Clásico', 'occasions' => 'Oficina', 'avoid' => 'Estampados']
     );
     same('Minimalista', $result['style'], 'lo que sí menciona, se actualiza');
     same('Oficina', $result['occasions'], 'lo que no menciona, sobrevive');
-    same('Hasta 120 €', $result['budget']);
+    same('Estampados', $result['avoid']);
     same('Tonos tierra', $result['colors']);
 });
 
@@ -130,6 +130,6 @@ test('el recorte se aplica venga de donde venga', function () {
 });
 
 test('un perfil completo que se reenvía entero no cambia', function () {
-    $perfil = ['style' => 'Minimalista', 'colors' => 'Verde', 'avoid' => 'Estampados', 'budget' => '120 €', 'occasions' => 'Oficina'];
+    $perfil = ['style' => 'Minimalista', 'colors' => 'Verde', 'avoid' => 'Estampados', 'occasions' => 'Oficina'];
     same($perfil, style_profile_update($perfil, $perfil));
 });

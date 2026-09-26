@@ -39,9 +39,14 @@ if(document.body.dataset.auth==='1'){
  // The unfiltered wardrobe ships inside the page, so the first paint costs no request.
  Array.isArray(window.APP.garments)?renderGarments(window.APP.garments):loadGarments();
  $('#profile-form').addEventListener('submit',async e=>{e.preventDefault();await api('/api/profile',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.fromEntries(new FormData(e.currentTarget)))});toast('Preferencias guardadas')});
+ // The budget is about this shopping trip, so it appears with the switch that starts one
+ // and is gone the rest of the time.
+ const shoppingToggle=$('#want-shopping'),budgetField=$('#budget-field');
+ const toggleBudget=()=>{budgetField.hidden=!shoppingToggle.checked};
+ shoppingToggle.addEventListener('change',toggleBudget);toggleBudget();
  const startAnalysis=async(force=false)=>{
   try{
-   const d=await api('/api/analyze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({shopping:$('#want-shopping')?.checked===true,force})});
+   const d=await api('/api/analyze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({shopping:$('#want-shopping')?.checked===true,budget:$('#shopping-budget')?.value||'',force})});
    // Nothing has changed since the last run, so the answer is already paid for.
    if(d.reused){
     switchView('outfits');

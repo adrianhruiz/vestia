@@ -79,3 +79,8 @@
 .nudge{display:grid;gap:4px;background:var(--sage);padding:14px 16px;margin-bottom:8px;text-decoration:none;color:var(--ink)}
 .nudge b{font-size:13px}
 .nudge span{font-size:11px;line-height:1.5;color:#4d5c56}
+
+/* The budget, next to the switch that makes it mean anything. The AI card is the light one,
+   so this borrows the same ink and rules as every other field in the app. */
+.ai-budget{display:grid;gap:6px;margin:0 0 12px;font-size:11px;font-weight:700;color:var(--muted)}
+.ai-budget input{border:1px solid var(--line);background:#fff;border-radius:3px;padding:9px 11px;font:400 13px 'DM Sans';color:var(--ink)}
