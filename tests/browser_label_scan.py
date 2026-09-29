@@ -102,7 +102,8 @@ async def main():
                     await page.locator('#label-search').click()
                     await page.wait_for_function("document.querySelector('#label-status').textContent.includes('No aparece')")
                     # Missing CSRF cannot trigger work; tokens cannot be guessed.
-                    assert await page.evaluate("async()=> (await fetch('/api/label-lookup',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({reference:'1165/738/800'})})).status") == 419
+                    csrf_check = await page.evaluate("async()=> {const r=await fetch('/api/label-lookup',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({reference:'1165/738/800'})});return {status:r.status,body:await r.text()}}")
+                    assert csrf_check['status'] == 403, csrf_check
                     assert await page.evaluate("async()=> (await fetch('/api/label-image?token=invalid')).status") == 404
                     anonymous = await browser.new_context()
                     stranger = await anonymous.new_page()
@@ -114,6 +115,8 @@ async def main():
                     try:
                         await other.add_cookies([{'name':'vestia_session','value':other_sid,'domain':host,'path':'/','secure':True}])
                         other_page = await other.new_page()
+                        await other_page.goto('https://'+host+'/api/label-image?token=invalid', wait_until='domcontentloaded')
+                        assert await other_page.evaluate("async()=> (await fetch('/api/label-lookup',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({reference:'1165/738/800'})})).status") == 403
                         await other_page.goto('https://'+host+'/', wait_until='domcontentloaded')
                         assert await other_page.evaluate("async token=>(await fetch('/api/label-image?token='+token)).status", photo_token) == 404
                         assert await other_page.evaluate("async()=>(await fetch('/catalog.php')).status") == 403

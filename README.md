@@ -177,3 +177,9 @@ Cada lectura limita el tiempo de OCR y la sesión admite seis lecturas por minut
 Pruebas: `php tests/run.php LabelScan` (SQLite, GD y Tesseract necesarios para todos los
 casos). El resto de pruebas siguen ejecutándose con `php tests/run.php`; las que usan
 MySQL requieren exclusivamente una base desechable mediante `TEST_DB_DATABASE`.
+
+El servicio de imágenes debe desplegar también `catalog/image_gateway.py`: la opción
+interna `exact=1` evita sustituir una fotografía fallida por la de otro color. Las
+selecciones de una captura anterior dejan de servir fotos si el catálogo se actualiza.
+La prueba de navegador está en `tests/browser_label_scan.py` y usa imágenes de etiqueta
+sintéticas, OCR real y las cuentas de prueba existentes; elimina las prendas que crea.

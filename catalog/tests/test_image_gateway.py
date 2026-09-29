@@ -63,5 +63,10 @@ class ImageGatewayTests(unittest.TestCase):
             self.assertEqual(photo.call_count, 2)
         with self.assertRaises(FileNotFoundError): gateway.product_photo((), 0)
 
+    def test_exact_color_photo_does_not_fall_back_to_another_color(self):
+        with patch.object(gateway, 'photo', side_effect=[ValueError('Missing selected photo'), (b'other color', 'image/webp')]) as photo:
+            with self.assertRaises(ValueError): gateway.product_photo(('selected', 'other'), 0, exact=True)
+            self.assertEqual(photo.call_count, 1)
+
 
 if __name__ == '__main__': unittest.main()

@@ -168,7 +168,11 @@ function label_choice(string $token): ?array {
 
 function label_photo(array $choice): array {
     if ($choice['image_position'] === null) return [404,'',''];
-    return catalog_image_gateway('image', ['product'=>$choice['product_id'], 'position'=>$choice['image_position'], 'size'=>'full']);
+    // A new catalog capture can reorder the gallery. Require a fresh selection then.
+    $query = catalog_db()->prepare('SELECT captured_at FROM products WHERE id=?');
+    $query->execute([$choice['product_id']]);
+    if ($query->fetchColumn() !== $choice['captured_at']) return [404,'',''];
+    return catalog_image_gateway('image', ['product'=>$choice['product_id'], 'position'=>$choice['image_position'], 'size'=>'full', 'exact'=>1]);
 }
 
 function label_store_photo(array $choice, int $uid): array {
