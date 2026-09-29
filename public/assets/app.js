@@ -54,21 +54,23 @@ if(document.body.dataset.auth==='1'){
   suggestSize();openModal('#garment-modal')
  };
  $('#add-garment').onclick=()=>openGarmentForm();
- $('#add-from-shop').onclick=()=>{openGarmentForm();linkInput.focus()};
+ $('#add-from-shop').onclick=()=>{openGarmentForm();$('#label-photo').click()};
  const imageInput=$('input[name=image]',garmentForm),preview=$('.upload-preview',garmentForm);let previewUrl='';
  const clearPreview=()=>{if(previewUrl)URL.revokeObjectURL(previewUrl);previewUrl='';preview.src='';preview.hidden=true;$('.dropzone b').textContent='＋ Añadir foto'};
  imageInput.addEventListener('change',()=>{if(previewUrl)URL.revokeObjectURL(previewUrl);const file=imageInput.files[0];previewUrl=file?URL.createObjectURL(file):'';preview.src=previewUrl;preview.hidden=!file;$('.dropzone b').textContent=file?'Cambiar foto':'＋ Añadir foto'});
  garmentForm.addEventListener('submit',async e=>{
   e.preventDefault();const err=$('.form-error',e.currentTarget);err.textContent='';
+  const saveButton=$('button.full',garmentForm);if(saveButton.disabled)return;saveButton.disabled=true;
   try{
    const d=await api('/api/garments',{method:'POST',body:new FormData(e.currentTarget)});
    if(sizeInput.value.trim())rememberedSizes[categorySelect.value]=sizeInput.value.trim();
-   e.currentTarget.reset();clearPreview();resetLinkBox();$('#garment-modal').hidden=true;
+   garmentForm.reset();clearPreview();resetLinkBox();$('#garment-modal').hidden=true;
    toast('Prenda añadida a tu armario');await loadGarments();
    // The server did the joining, so the panel is repainted from what it answered rather than
    // from a second request that could disagree with it.
    if(d.onboarding)applyOnboarding(d)
   }catch(x){err.textContent=x.message}
+  finally{saveButton.disabled=false}
  });
  const renderGarments=items=>{garmentCache=items;$('#garment-count').textContent=`${items.length} ${items.length===1?'prenda':'prendas'} en tu colección`;$('#garment-grid').innerHTML=items.length?items.map(g=>`<article class="garment"><button class="delete-item" data-delete="${g.id}" aria-label="Eliminar">×</button><div class="garment-image">${thumbOf(g)?`<img src="${safeAssetUrl(thumbOf(g))}" alt="${esc(g.name)}" loading="lazy" decoding="async">`:`<span class="garment-placeholder">${garmentIcon(g.category)}</span>`}</div><div class="garment-body"><span class="garment-brand">${esc(g.brand)}</span><h2>${esc(g.name)}</h2><div class="garment-meta">${esc([g.color,g.size,g.reference,g.price_note].filter(Boolean).join(' · '))}</div>${g.source_url?`<a class="product-source" href="${safeUrl(g.source_url)}" target="_blank" rel="noopener noreferrer">Ver producto real ↗</a>`:''}</div></article>`).join(''):'<div class="empty"><b>Tu armario está esperando</b><p>Añade la primera prenda con una foto o su referencia.</p></div>';$$('[data-delete]').forEach(b=>b.onclick=async()=>{if(confirm('¿Eliminar esta prenda?')){await api('/api/garments/'+b.dataset.delete,{method:'DELETE'});loadGarments()}})};
  const loadGarments=async()=>{const q=encodeURIComponent($('#search').value),cat=encodeURIComponent($('#category-filter').value);renderGarments((await api(`/api/garments?q=${q}&category=${cat}`)).items)};
@@ -194,24 +196,83 @@ if(document.body.dataset.auth==='1'){
    delete shares[sharing.index];sharing=null;$('#share-modal').hidden=true;toast('El enlace ya no funciona');renderResult(lastResult)}
   catch(x){$('.form-error',$('#share-modal')).textContent=x.message}
  });
+ // ---- Reference lookup and local label recognition ----------------------------------
+ let labelRevision=0,labelRequest=null;
+ const labelStatus=$('#label-status'),labelResults=$('#label-results');
+ const labelBusy=busy=>{$('#label-search').disabled=busy;$('#label-photo').disabled=busy;$('#label-search').textContent=busy?'Procesando…':'Buscar referencia'};
+ function clearLabelSelection(){
+  $('[name=catalog_token]',garmentForm).value='';
+  $('[name=use_catalog_image]',garmentForm).checked=false;
+  $('#label-use-photo').hidden=true;
+ }
+ function cancelLabelRequest(){labelRevision++;labelRequest?.abort();labelRequest=null;labelBusy(false)}
+ function resetLabelBox(){
+  cancelLabelRequest();clearLabelSelection();labelResults.replaceChildren();labelStatus.textContent='';
+  $('#label-photo').value='';$('#label-brand').value='';$('#label-reference').value='';$('#label-size').value='';$('#label-references').replaceChildren();
+ }
+ // Closing or reopening the form invalidates in-flight responses from the previous photo.
+ new MutationObserver(()=>{if($('#garment-modal').hidden)cancelLabelRequest()}).observe($('#garment-modal'),{attributes:true,attributeFilter:['hidden']});
+ for(const selector of ['#label-brand','#label-reference'])$(selector).addEventListener('input',()=>{
+  cancelLabelRequest();clearLabelSelection();labelResults.replaceChildren();labelStatus.textContent='';
+ });
+ for(const name of ['brand','reference'])$(`[name="${name}"]`,garmentForm).addEventListener('input',()=>{
+  if($('[name=catalog_token]',garmentForm).value){clearLabelSelection();$('[name=source_url]',garmentForm).value='';$('[name=price_note]',garmentForm).value='';labelStatus.textContent='Has cambiado la identificación. Busca de nuevo si quieres usar la foto oficial.'}
+ });
+ $('#label-photo').addEventListener('change',async()=>{
+  const file=$('#label-photo').files[0];if(!file)return;
+  cancelLabelRequest();clearLabelSelection();labelResults.replaceChildren();
+  if(file.size>8*1024*1024){labelStatus.textContent='La foto supera 8 MB. Elige una más pequeña.';return}
+  const revision=labelRevision;labelRequest=new AbortController();labelBusy(true);
+  labelStatus.textContent='Leyendo la etiqueta…';
+  try{
+   const data=new FormData();data.append('label',file);
+   const {label}=await api('/api/label-scan',{method:'POST',body:data,signal:labelRequest.signal});
+   if(revision!==labelRevision)return;
+   $('#label-brand').value=label.brand;$('#label-reference').value=label.reference;$('#label-size').value=label.size;
+   $('#label-references').innerHTML=label.references.map(ref=>`<option value="${esc(ref)}">`).join('');
+   labelStatus.textContent=label.reference?'Referencia leída. Revisa marca, referencia y talla; después pulsa Buscar referencia.':label.references.length?'He leído varias referencias. Elige una en el campo Referencia antes de buscar.':'No he podido distinguir una referencia. Acerca la cámara a los números o escríbelos aquí.';
+   $('#label-reference').focus();
+  }catch(x){if(x.name!=='AbortError'&&revision===labelRevision)labelStatus.textContent=x.message}
+  finally{if(revision===labelRevision){labelBusy(false);$('#label-photo').value=''}}
+ });
+ $('#label-search').onclick=async()=>{
+  cancelLabelRequest();clearLabelSelection();labelResults.replaceChildren();
+  const revision=labelRevision;labelRequest=new AbortController();labelBusy(true);labelStatus.textContent='Buscando en el catálogo…';
+  try{
+   const result=await api('/api/label-lookup',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({brand:$('#label-brand').value,reference:$('#label-reference').value}),signal:labelRequest.signal});
+   if(revision!==labelRevision)return;
+   labelStatus.textContent=result.items.length?`Elige tu prenda y comprueba el color. Los datos corresponden a la captura del catálogo.${result.truncated?' Hay más coincidencias: indica marca y referencia completa para concretar.':''}`:'No aparece en el catálogo guardado. Comprueba la referencia, prueba con el enlace de la tienda o completa los datos manualmente.';
+   labelResults.innerHTML=result.items.map((g,i)=>`<button type="button" class="label-match" data-match="${i}" aria-pressed="false">${g.image_url?`<img src="${esc(g.image_url)}" alt="${esc(g.name)}" loading="lazy">`:'<span class="label-no-photo">Sin foto</span>'}<span><b>${esc(g.brand)} · ${esc(g.name)}</b><small>${esc(g.reference)} · ${esc(g.color||'Color no informado')}</small><small>${esc(g.price_note)} · Captura ${esc(new Date(g.captured_at).toLocaleDateString('es-ES'))}</small></span></button>`).join('');
+   $$('img',labelResults).forEach(img=>img.addEventListener('error',()=>{img.hidden=true}));
+   $$('[data-match]',labelResults).forEach(button=>button.onclick=()=>{
+    const g=result.items[Number(button.dataset.match)];
+    for(const name of ['name','brand','reference','category','color','source_url','price_note','notes'])$(`[name="${name}"]`,garmentForm).value=g[name]||'';
+    sizeInput.value=$('#label-size').value.trim();
+    $('#link-sizes').innerHTML=g.sizes.map(size=>`<option value="${esc(size)}">`).join('');
+    $('[name=catalog_token]',garmentForm).value=g.token;
+    $('[name=use_catalog_image]',garmentForm).checked=!!g.image_url;
+    $('#label-use-photo').hidden=!g.image_url;
+    $$('[data-match]',labelResults).forEach(b=>b.setAttribute('aria-pressed',String(b===button)));
+    labelStatus.textContent='Datos preparados. Revisa la talla y los demás campos antes de guardar. Puedes sustituir la foto oficial por una tuya.';
+    $('[name=name]',garmentForm).focus();
+   });
+  }catch(x){if(x.name!=='AbortError'&&revision===labelRevision)labelStatus.textContent=x.message}
+  finally{if(revision===labelRevision)labelBusy(false)}
+ };
+ $('#label-reference').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();if(!$('#label-search').disabled)$('#label-search').click()}});
+
  // ---- A link to the shop ------------------------------------------------------------
- // The product page already answers eight of the nine boxes below, so pasting its link is the
- // fast way to add a garment and the photo is the way that always works.
- //
- // This was going to be a scan of the tag's QR, and the tag turned out not to carry one yet:
- // what it has is an EAN barcode, the printed reference and the size as text, and the group's
- // own item-level tech is RFID, which no phone camera reads. Nothing here decodes anything
- // until that is settled -- app/ProductLink.php says what is known and where a reader would
- // plug in.
  const linkInput=$('#link-url'),linkLead=$('#link-lead');
  const LINK_LEAD=linkLead.textContent;
- const resetLinkBox=()=>{linkInput.value='';$('#link-sizes').innerHTML='';linkLead.textContent=LINK_LEAD};
+ const resetLinkBox=()=>{linkInput.value='';$('#link-sizes').innerHTML='';linkLead.textContent=LINK_LEAD;resetLabelBox()};
  $('#link-fetch').onclick=()=>fillFromLink(linkInput.value);
  linkInput.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();fillFromLink(linkInput.value)}});
  async function fillFromLink(url){
-  linkLead.textContent='Buscando esa prenda…';
+  cancelLabelRequest();clearLabelSelection();labelResults.replaceChildren();
+  const revision=labelRevision;linkLead.textContent='Buscando esa prenda…';
   try{
    const {garment}=await api('/api/product-link',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url})});
+   if(revision!==labelRevision)return;
    for(const [name,value] of Object.entries(garment)){
     if(name==='sizes')continue;
     const field=$(`[name="${name}"]`,garmentForm);
@@ -224,7 +285,7 @@ if(document.body.dataset.auth==='1'){
    linkLead.textContent=garment.name
     ?`${garment.brand} · ${garment.name}. Compruébalo y guarda.`
     :`Ficha de ${garment.brand}. No tengo esta prenda en el catálogo, así que el nombre lo pones tú.`
-  }catch(x){linkLead.textContent=x.message}
+  }catch(x){if(revision===labelRevision)linkLead.textContent=x.message}
  }
 
  // ---- The welcome, inside the wardrobe -----------------------------------------------

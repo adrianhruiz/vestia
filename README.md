@@ -111,10 +111,10 @@ gh pr create --base develop --fill
 El flujo completo —revisión, publicación a producción, hotfixes y convenciones— está en
 **[CONTRIBUTING.md](CONTRIBUTING.md)**.
 
-## Versión 0.0.6 y cuentas de prueba
+## Versión 0.0.7 y cuentas de prueba
 
 El archivo `VERSION` identifica la versión del código desplegado. La cabecera muestra
-«Versión 0.0.6» en la portada, dentro de la aplicación, en el catálogo y en la página
+«Versión 0.0.7» en la portada, dentro de la aplicación, en el catálogo y en la página
 pública de un look compartido, también en móvil.
 Para cambiar la versión en futuros despliegues, actualiza ese archivo en la rama correspondiente.
 
@@ -152,3 +152,34 @@ public/    index.php (front controller) · outfit-image.php · assets/ · upload
 scripts/   worker.php (cola de jobs) · migrate.php · seed_*.php · import_official_catalog.php
 storage/   official_catalog.json · outfits/ · logs/
 ```
+
+## Escaneo de etiquetas (0.0.7)
+
+En «Escanear etiqueta» o «Añadir prenda», fotografía la referencia impresa o escríbela.
+Revisa marca, referencia y talla, pulsa «Buscar referencia» y elige una coincidencia.
+El formulario se completa con los datos del catálogo; la talla se toma de la etiqueta
+solo cuando se ha podido leer. Revisa los campos y guarda. Puedes usar la fotografía
+oficial disponible o subir una tuya. Si falla su descarga, puedes desmarcarla y guardar.
+
+La búsqueda usa el catálogo privado ya recopilado y distingue modelo y color. No realiza
+una búsqueda nueva en la web de la tienda ni decodifica códigos de barras. Si no hay
+coincidencias, permite pegar el enlace o completar la prenda manualmente. Las sugerencias
+caducan a los 30 minutos y pertenecen a la sesión que hizo la consulta. El visor de
+administración mantiene sus permisos; los usuarios acceden únicamente a las coincidencias
+de sus búsquedas y sus fotos. Precio y disponibilidad no se consultan en tiempo real.
+
+Dependencias en el servidor: PHP con GD, EXIF, PDO SQLite y cURL, `timeout`, y Tesseract
+con los idiomas inglés y español (`apt-get install tesseract-ocr tesseract-ocr-spa`).
+La lectura es local, admite JPG/PNG/WebP hasta 8 MB y 24 megapíxeles, aplica orientación
+EXIF y elimina el fichero temporal al acabar. No se conserva la foto de la etiqueta.
+Cada lectura limita el tiempo de OCR y la sesión admite seis lecturas por minuto.
+
+Pruebas: `php tests/run.php LabelScan` (SQLite, GD y Tesseract necesarios para todos los
+casos). El resto de pruebas siguen ejecutándose con `php tests/run.php`; las que usan
+MySQL requieren exclusivamente una base desechable mediante `TEST_DB_DATABASE`.
+
+El servicio de imágenes debe desplegar también `catalog/image_gateway.py`: la opción
+interna `exact=1` evita sustituir una fotografía fallida por la de otro color. Las
+selecciones de una captura anterior dejan de servir fotos si el catálogo se actualiza.
+La prueba de navegador está en `tests/browser_label_scan.py` y usa imágenes de etiqueta
+sintéticas, OCR real y las cuentas de prueba existentes; elimina las prendas que crea.

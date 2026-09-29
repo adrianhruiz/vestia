@@ -4,6 +4,7 @@ import pathlib
 import sqlite3
 import tempfile
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 from PIL import Image
 import image_gateway as gateway
@@ -14,7 +15,8 @@ class ImageGatewayTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         root = pathlib.Path(self.temp.name)
         self.patches = [patch.object(gateway, 'ROOT', root), patch.object(gateway, 'CACHE', root),
-                        patch.object(gateway, 'VIEWER', root / 'viewer.sqlite3')]
+                        patch.object(gateway, 'VIEWER', root / 'viewer.sqlite3'),
+                        patch.object(gateway.shutil, 'disk_usage', return_value=SimpleNamespace(free=16 * 1024**3))]
         for p in self.patches: p.start()
         gateway.sources.cache_clear()
 
@@ -62,6 +64,17 @@ class ImageGatewayTests(unittest.TestCase):
             self.assertEqual(gateway.product_photo(('swatch', 'garment'), 0), (b'photo', 'image/webp'))
             self.assertEqual(photo.call_count, 2)
         with self.assertRaises(FileNotFoundError): gateway.product_photo((), 0)
+
+    def test_exact_color_photo_does_not_fall_back_to_another_color(self):
+        with patch.object(gateway, 'photo', side_effect=[ValueError('Missing selected photo'), (b'other color', 'image/webp')]) as photo:
+            with self.assertRaises(ValueError): gateway.product_photo(('selected', 'other'), 0, exact=True)
+            self.assertEqual(photo.call_count, 1)
+
+    def test_disk_reserve_prevents_new_downloads(self):
+        with patch.object(gateway, 'archived_image', return_value=None), patch.object(gateway, 'download') as download, patch.object(gateway.shutil, 'disk_usage', return_value=SimpleNamespace(free=1)):
+            with self.assertRaisesRegex(RuntimeError, 'disk reserve'):
+                gateway.photo('https://static.zara.net/assets/new.jpg')
+            download.assert_not_called()
 
 
 if __name__ == '__main__': unittest.main()

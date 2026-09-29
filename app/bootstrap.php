@@ -164,7 +164,8 @@ function require_user(): int { $id = user_id(); if (!$id) json_response(['error'
 function csrf_token(): string { if (empty($_SESSION['csrf'])) $_SESSION['csrf'] = bin2hex(random_bytes(24)); return $_SESSION['csrf']; }
 function require_csrf(): void {
     $token = $_SERVER['HTTP_X_CSRF_TOKEN'] ?? $_POST['_csrf'] ?? '';
-    if (!hash_equals($_SESSION['csrf'] ?? '', (string)$token)) json_response(['error' => 'Sesión caducada. Recarga la página.'], 419);
+    $expected = $_SESSION['csrf'] ?? '';
+    if (!is_string($token) || !is_string($expected) || $expected === '' || !hash_equals($expected, $token)) json_response(['error' => 'Sesión caducada. Recarga la página.'], 403);
 }
 function request_json(): array {
     $data = json_decode(file_get_contents('php://input') ?: '{}', true);

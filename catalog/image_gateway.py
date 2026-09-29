@@ -127,10 +127,10 @@ def photo(url, full=False):
         return out.getvalue(), 'image/webp'
 
 
-def product_photo(urls, position, full=False):
+def product_photo(urls, position, full=False, exact=False):
     if position < 0 or position >= len(urls):
         raise FileNotFoundError('Image not found')
-    candidates = urls[:10] if position == 0 else urls[position:position + 1]
+    candidates = urls[:10] if position == 0 and not exact else urls[position:position + 1]
     last_error = None
     for url in candidates:
         try:
@@ -159,7 +159,7 @@ class Handler(BaseHTTPRequestHandler):
                 mime = 'application/json'
             else:
                 position = int(query.get('position', ['0'])[0])
-                data, mime = product_photo(urls, position, query.get('size') == ['full'])
+                data, mime = product_photo(urls, position, query.get('size') == ['full'], query.get('exact') == ['1'])
             self.send_response(200)
             self.send_header('Content-Type', mime)
             self.send_header('Content-Length', str(len(data)))
