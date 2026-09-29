@@ -30,7 +30,7 @@ test('recognizes compact references only with a printed reference marker', funct
 function label_test_product(): array {
     return ['bundleProductSummaries'=>[
         ['detail'=>['colors'=>[
-            ['id'=>'800','reference'=>'C00123045800-I2026','name'=>'Negro','sizes'=>[['name'=>'M'],['name'=>'L']]],
+            ['id'=>'800','reference'=>'C00123045800-I2026','name'=>'Negro','sizes'=>[['name'=>'M','price'=>3599],['name'=>'L','price'=>3599]]],
             ['id'=>'006','reference'=>'C00123045006-I2026','name'=>'Crudo','sizes'=>[['name'=>'S']]],
             ['id'=>'500','reference'=>'C07890123500-I2026','name'=>'Verde'],
         ]]],
@@ -54,7 +54,7 @@ test('catalog lookup requires exact model, brand and color and deduplicates vari
     $insert=$db->prepare('INSERT INTO products VALUES(?,?,?,?,?,?,?,?,?,?)');
     foreach ([[1,'zara'],[2,'zara'],[3,'bershka']] as [$id,$brand]) $insert->execute([$id,$brand,'0123/045','CAMISA LINO',json_encode(label_test_product()),'https://www.'.$brand.'.com/es/camisa.html',29.99,'EUR','<p>Lino</p>','2026-09-29']);
     $found=label_catalog_matches($db,'0123/045/800','Zara');
-    same(1,count($found));same('Negro',$found[0]['color']);same(['M','L'],$found[0]['sizes']);same('Lino',$found[0]['notes']);
+    same(1,count($found));same('Negro',$found[0]['color']);same(['M','L'],$found[0]['sizes']);same('Lino',$found[0]['notes']);same('35,99 €',$found[0]['price_note']);truthy(str_ends_with($found[0]['source_url'],'?colorId=800'));
     same(2,count(label_catalog_matches($db,'0123/045','Zara')));
     same(2,count(label_catalog_matches($db,'0123/045/800','')));
     same([],label_catalog_matches($db,'0123/045/999','Zara'));

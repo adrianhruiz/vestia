@@ -17,7 +17,7 @@ from playwright.async_api import async_playwright
 SESSION = r'''
 require '/home/saymon/php-projects/armario/slots/'.$argv[1].'/app/bootstrap.php';
 $s=db()->prepare('SELECT id FROM users WHERE email=?');$s->execute([$argv[2]]);
-$uid=$s->fetchColumn();if(!$uid)exit(2);
+$uid=$argv[2]==='__nonadmin__' ? db()->query('SELECT u.id FROM users u LEFT JOIN catalog_administrators a ON a.user_id=u.id WHERE a.user_id IS NULL LIMIT 1')->fetchColumn() : $s->fetchColumn();if(!$uid)exit(2);
 session_id(bin2hex(random_bytes(24)));session_start();$_SESSION['user_id']=(int)$uid;
 echo session_id();session_write_close();
 '''
@@ -71,8 +71,12 @@ async def main():
                     assert await page.locator('[name=color]').input_value() == 'Negro'
                     assert await page.locator('[name=size]').input_value() == 'M'
                     assert await page.locator('[name=use_catalog_image]').is_checked()
+                    photo_token = await page.locator('[name=catalog_token]').input_value()
                     await page.wait_for_function("[...document.querySelectorAll('.label-match img')].some(i=>i.complete&&i.naturalWidth>0)", timeout=60000)
-                    assert not await page.evaluate('document.documentElement.scrollWidth > innerWidth'), 'Mobile overflow'
+                    if await page.evaluate('document.documentElement.scrollWidth > innerWidth'):
+                        await page.screenshot(path=f'/tmp/vestia-label-{slot}-overflow.png')
+                        print(await page.evaluate("[...document.querySelectorAll('body *')].filter(e=>e.getBoundingClientRect().right>innerWidth+1&&e.getBoundingClientRect().width>0).slice(0,15).map(e=>({tag:e.tagName,cls:e.className,width:e.getBoundingClientRect().width,right:e.getBoundingClientRect().right}))"), flush=True)
+                        raise AssertionError('Mobile overflow')
                     await page.locator('#label-title').scroll_into_view_if_needed()
                     await page.screenshot(path=f'/tmp/vestia-label-{slot}-mobile.png')
                     await page.set_viewport_size({'width':1440,'height':1000})
@@ -100,8 +104,26 @@ async def main():
                     # Missing CSRF cannot trigger work; tokens cannot be guessed.
                     assert await page.evaluate("async()=> (await fetch('/api/label-lookup',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({reference:'1165/738/800'})})).status") == 419
                     assert await page.evaluate("async()=> (await fetch('/api/label-image?token=invalid')).status") == 404
+                    anonymous = await browser.new_context()
+                    stranger = await anonymous.new_page()
+                    await stranger.goto('https://'+host+'/', wait_until='domcontentloaded')
+                    assert await stranger.evaluate("async token=>(await fetch('/api/label-image?token='+token)).status", photo_token) == 401
+                    await anonymous.close()
+                    other_sid = php(SESSION, slot, '__nonadmin__')
+                    other = await browser.new_context()
+                    try:
+                        await other.add_cookies([{'name':'vestia_session','value':other_sid,'domain':host,'path':'/','secure':True}])
+                        other_page = await other.new_page()
+                        await other_page.goto('https://'+host+'/', wait_until='domcontentloaded')
+                        assert await other_page.evaluate("async token=>(await fetch('/api/label-image?token='+token)).status", photo_token) == 404
+                        assert await other_page.evaluate("async()=>(await fetch('/catalog.php')).status") == 403
+                        found = await other_page.evaluate("async()=> {const r=await fetch('/api/label-lookup',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':window.APP.csrf},body:JSON.stringify({brand:'Zara',reference:'1165/738/800'})});return {status:r.status,data:await r.json()}}")
+                        assert found['status'] == 200 and found['data']['items'], found
+                    finally:
+                        await other.close()
+                        php(DESTROY, other_sid)
                     assert not errors, errors
-                    print(json.dumps({'slot':slot,'ocr':'passed','lookup':'passed','photo_saved':'passed','mobile':'passed','no_match':'passed','csrf':'passed','javascript_errors':errors}), flush=True)
+                    print(json.dumps({'slot':slot,'ocr':'passed','lookup':'passed','photo_saved':'passed','mobile':'passed','no_match':'passed','csrf':'passed','non_admin_lookup':'passed','image_privacy':'passed','javascript_errors':errors}), flush=True)
                 finally:
                     php(CLEANUP, slot, email, marker)
                     await context.close()
