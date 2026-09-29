@@ -2,34 +2,9 @@
 declare(strict_types=1);
 
 /**
- * A link to an Inditex product, and how much of a garment it fills in for us.
- *
- * Adding a garment by hand is nine boxes, and the shop's own page already answers eight of
- * them. So the fast way in is a URL -- copied from the app, from a browser, from a shared
- * link -- and the slow way in, which always works, is a photo and the boxes.
- *
- * ## Why this is not about scanning the tag
- *
- * It was going to be, and the tag turned out not to support it yet. What an Inditex hangtag
- * actually carries today is an EAN barcode, the printed reference in AAAA/BBB/CCC form, and
- * the size as plain text; item-level identification across the group is RFID, inside the
- * security tag, which no phone camera can read. QR codes are arriving on the label -- the
- * accessibility labelling rolled out across the eight brands from June 2026 sits next to one,
- * and the EU product passport makes one compulsory for textiles in 2027 -- but those point at
- * a traceability page, and nothing we have checked says they resolve to a product page or
- * carry a size.
- *
- * So nothing here assumes a scanner, and nothing here decodes anything. When the way to scan
- * an article is decided, this is the function it hands its answer to: whatever a reader ends
- * up producing -- a URL, a reference, a barcode -- the job after it is still "which garment is
- * this", which is what the rest of this file does.
- *
- * Nothing here goes out to the network either. Everything it answers comes from the URL itself
- * plus the Inditex catalogue this installation already harvests (app/Catalog.php), so adding a
- * garment is as fast as a form submit and cannot be turned into a request to somewhere of the
- * sender's choosing.
- *
- * Whatever comes back is a suggestion in a form the person confirms, never a saved row.
+ * Suggest garment fields from a store URL and the saved catalog.
+ * Printed label recognition and reference lookup live in LabelScan.php.
+ * Suggestions are reviewed in the garment form before anything is saved.
  */
 
 /**
