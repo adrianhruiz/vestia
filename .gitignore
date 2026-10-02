@@ -3,11 +3,9 @@
 .env.*
 !.env.example
 
-# Runtime data: user uploads, generated outfits and logs
+# Runtime data: user uploads, shared looks and logs
 /public/uploads/*
 !/public/uploads/.gitkeep
-/storage/outfits/*
-!/storage/outfits/.gitkeep
 /storage/shares/*
 !/storage/shares/.gitkeep
 /storage/style/*

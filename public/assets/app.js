@@ -133,29 +133,19 @@ if(document.body.dataset.auth==='1'){
   el.textContent=left===null||left===undefined?'':left>0?`${left} ${left===1?'análisis restante':'análisis restantes'} esta hora`:'Sin análisis disponibles hasta dentro de un rato';
  }
  async function loadJobs(){const d=await api('/api/jobs'),{jobs,result}=d;showQuota(d.analyses_left);const running=jobs.find(j=>['queued','processing'].includes(j.status));if(running){activeJob=running.id;renderRunning(running);startPolling();return}if(result){resultJobId=d.result_job_id;shares=d.shares||{};renderResult(result);return}const last=jobs[0];$('#jobs').innerHTML=last&&last.status==='failed'?`<div class="job-running"><b>Último análisis fallido</b><p>${esc(last.error)}</p></div>`:last&&last.status==='cancelled'?'<div class="job-running"><b>Análisis cancelado</b><p>Puedes lanzar uno nuevo cuando quieras.</p></div>':'<div class="empty"><b>Aún no hay looks</b><p>Analiza tu armario para crear tus primeras combinaciones.</p></div>'}
- function outfitVisual(o){if(o.image_url)return `<img src="${safeAssetUrl(o.image_url)}" alt="Visualización de ${esc(o.name)}" loading="lazy">`;const pieces=(o.garment_ids||[]).map(id=>garmentCache.find(g=>Number(g.id)===Number(id))).filter(g=>thumbOf(g)).slice(0,4);return pieces.length?`<div class="outfit-collage">${pieces.map(g=>`<img src="${safeAssetUrl(thumbOf(g))}" alt="${esc(g.name)}" loading="lazy" decoding="async">`).join('')}</div>`:'<div class="garment-image outfit-placeholder">✦</div>'}
- function renderResult(r){lastResult=r;$('#jobs').innerHTML=`<section class="analysis-summary"><h2>La lectura de tu armario</h2><p>${esc(r.summary)}</p><div class="chips">${(r.palette||[]).map(x=>`<span class="chip">${esc(x)}</span>`).join('')}</div></section><div class="outfit-grid">${(r.outfits||[]).map((o,i)=>`<article class="outfit">${outfitVisual(o)}<div class="outfit-body"><span class="occasion">${esc(o.occasion)}</span><h3>${esc(o.name)}</h3><p>${esc(o.reason)}</p>${o.missing_items?.length?`<p><b>Para completar:</b> ${esc(o.missing_items.join(', '))}</p>`:''}${o.shopping?.length?`<div class="shopping"><small>COMPRAR EN INDITEX</small>${o.shopping.map(s=>`<a href="${safeUrl(s.url)}" target="_blank" rel="noopener noreferrer sponsored"><span>${esc(s.brand)} · ${esc(s.name)}</span><b>↗</b></a>`).join('')}</div>`:''}${o.image_url?'':`<button class="btn btn-soft full draw-outfit" data-outfit="${i}">✦ Generar visual</button>`}<button class="btn btn-soft full share-outfit" data-outfit="${i}">${shares[i]?`↗ Compartido${shares[i].views?` · ${shares[i].views} ${shares[i].views===1?'visita':'visitas'}`:''}`:'↗ Compartir look'}</button></div></article>`).join('')}</div>`;$$('.draw-outfit').forEach(b=>b.onclick=()=>drawOutfit(b));$$('.share-outfit').forEach(b=>b.onclick=()=>openShare(Number(b.dataset.outfit)))}
- // Pictures are drawn one at a time, when someone asks. An analysis used to generate all
- // five up front, so four of them were usually paid for and never looked at.
- async function drawOutfit(button){
-  if(resultJobId===null)return;
-  const label=button.textContent;
-  button.disabled=true;button.textContent='Dibujando…';
-  try{
-   const d=await api(`/api/jobs/${resultJobId}/outfits/${button.dataset.outfit}/image`,{method:'POST'});
-   if(!d.ready)await waitForJob(d.job_id);
-   loadJobs()
-  }catch(x){button.disabled=false;button.textContent=label;toast(x.message)}
- }
+ function outfitVisual(o){const pieces=(o.garment_ids||[]).map(id=>garmentCache.find(g=>Number(g.id)===Number(id))).filter(g=>thumbOf(g)).slice(0,4);return pieces.length?`<div class="outfit-collage">${pieces.map(g=>`<img src="${safeAssetUrl(thumbOf(g))}" alt="${esc(g.name)}" loading="lazy" decoding="async">`).join('')}</div>`:'<div class="garment-image outfit-placeholder">✦</div>'}
+ function renderResult(r){lastResult=r;$('#jobs').innerHTML=`<section class="analysis-summary"><h2>La lectura de tu armario</h2><p>${esc(r.summary)}</p><div class="chips">${(r.palette||[]).map(x=>`<span class="chip">${esc(x)}</span>`).join('')}</div></section><div class="outfit-grid">${(r.outfits||[]).map((o,i)=>`<article class="outfit">${outfitVisual(o)}<div class="outfit-body"><span class="occasion">${esc(o.occasion)}</span><h3>${esc(o.name)}</h3><p>${esc(o.reason)}</p>${o.missing_items?.length?`<p><b>Para completar:</b> ${esc(o.missing_items.join(', '))}</p>`:''}${o.shopping?.length?`<div class="shopping"><small>COMPRAR EN INDITEX</small>${o.shopping.map(s=>`<a href="${safeUrl(s.url)}" target="_blank" rel="noopener noreferrer sponsored"><span>${esc(s.brand)} · ${esc(s.name)}</span><b>↗</b></a>`).join('')}</div>`:''}<button class="btn btn-soft full share-outfit" data-outfit="${i}">${shares[i]?`↗ Compartido${shares[i].views?` · ${shares[i].views} ${shares[i].views===1?'visita':'visitas'}`:''}`:'↗ Compartir look'}</button></div></article>`).join('')}</div>`;$$('.share-outfit').forEach(b=>b.onclick=()=>openShare(Number(b.dataset.outfit)))}
+ // Waiting on the one job the person is standing in front of: the style reading they asked
+ // for from "Mi estilo".
  async function waitForJob(id){
   const deadline=Date.now()+5*60*1000;
   for(let wait=2000;Date.now()<deadline;wait=Math.min(Math.round(wait*1.4),10000)){
    await new Promise(resolve=>setTimeout(resolve,wait));
    const {job}=await api('/api/jobs/'+id);
    if(job.status==='completed')return;
-   if(!['queued','processing'].includes(job.status))throw new Error(job.error||'No se pudo generar la imagen.')
+   if(!['queued','processing'].includes(job.status))throw new Error(job.error||'No se pudo completar la lectura.')
   }
-  throw new Error('La imagen está tardando demasiado. Recarga la página en un minuto.')
+  throw new Error('La lectura está tardando demasiado. Recarga la página en un minuto.')
  }
  // Sharing is a modal rather than a straight navigator.share() on the click. The link has
  // to be created first, and an await before share() spends the transient user activation it

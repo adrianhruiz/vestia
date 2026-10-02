@@ -4,8 +4,8 @@ declare(strict_types=1);
 require_once APP_ROOT . '/app/Images.php';
 
 /**
- * A shared look: the snapshot stored in outfit_shares, the two public copies of its picture
- * and the page a stranger lands on at /o/{token}.
+ * A shared look: the snapshot stored in outfit_shares, the preview card drawn for it and
+ * the page a stranger lands on at /o/{token}.
  *
  * The page is not a data dump, it is the shop window: someone who has never heard of Vestia
  * arrives here from a chat, and what they see is one real look put together out of one real
@@ -17,9 +17,7 @@ require_once APP_ROOT . '/app/Images.php';
 /** 1.91:1 is the card WhatsApp, Telegram, Slack and X expect from og:image. */
 const SHARE_OG_WIDTH = 1200;
 const SHARE_OG_HEIGHT = 630;
-/** Longest side of the copy the page itself paints. */
-const SHARE_PAGE_SIDE = 1200;
-/** Garments drawn into the preview card of a look that has no generated picture. */
+/** Garments drawn into the preview card of a look. */
 const SHARE_OG_PIECES = 4;
 /** Links one account may keep alive at once, so the endpoint is not unlimited storage. */
 const SHARE_MAX_ACTIVE = 50;
@@ -32,7 +30,12 @@ function share_dir(): string {
     return $dir;
 }
 
-/** The two files a share owns: what the page paints, and what the chat app previews. */
+/**
+ * The files a share may own: what the chat app previews, and -- only for links created back
+ * when Vestia generated a picture of each look -- the copy the page itself paints. Nothing
+ * writes a page copy any more; the key stays so the shares that already have one keep it
+ * instead of silently losing their picture.
+ */
 function share_files(string $token): array {
     return ['page' => share_dir() . '/' . $token . '.webp', 'og' => share_dir() . '/' . $token . '-og.jpg'];
 }
@@ -111,31 +114,8 @@ function share_cover(GdImage $card, GdImage $src, int $x, int $y, int $width, in
 }
 
 /**
- * The preview card of a look that has a generated picture. The picture is a 2:3 portrait and
- * the card is 1.91:1, so containing it leaves two empty columns: they get a blurred copy of
- * the same photo, which reads as a deliberate frame where a flat fill reads as a broken
- * image.
- */
-function share_og_from_image(GdImage $source): GdImage {
-    $card = imagecreatetruecolor(SHARE_OG_WIDTH, SHARE_OG_HEIGHT);
-    $backdrop = imagescale($source, 80);
-    if ($backdrop !== false) {
-        // Blurring at thumbnail size and letting the upscale smooth it is far cheaper than
-        // running the filter over 1200x630.
-        for ($pass = 0; $pass < 3; $pass++) imagefilter($backdrop, IMG_FILTER_GAUSSIAN_BLUR);
-        share_cover($card, $backdrop, 0, 0, SHARE_OG_WIDTH, SHARE_OG_HEIGHT);
-        imagedestroy($backdrop);
-    }
-    $width = (int) round(imagesx($source) * SHARE_OG_HEIGHT / imagesy($source));
-    imagecopyresampled($card, $source, (int) ((SHARE_OG_WIDTH - $width) / 2), 0, 0, 0,
-        $width, SHARE_OG_HEIGHT, imagesx($source), imagesy($source));
-    return $card;
-}
-
-/**
- * The preview card of a look nobody has drawn yet -- which is most of them, now that the
- * pictures are generated on demand. The garments themselves make the card: four columns of
- * real clothes say more about Vestia than a stock photo would.
+ * The preview card of a shared look. The garments themselves make it: four columns of real
+ * clothes say more about Vestia than a stock photo would.
  */
 function share_og_from_garments(array $pieces): ?GdImage {
     $images = [];
@@ -158,25 +138,15 @@ function share_og_from_garments(array $pieces): ?GdImage {
 }
 
 /**
- * Writes the two public copies of a share. The generated picture is a 1024x1536 PNG of about
- * two megabytes, and the share page is the first thing a stranger ever loads from Vestia on
- * whatever connection they happen to be on, so the page gets a WebP instead.
+ * Writes the public preview card of a share, built from the photos of its own garments. A
+ * look where none of them has a photo leaves nothing to draw, and no card is written: the
+ * page falls back to the hero in its og:image.
  */
-function store_share_images(array $snapshot, ?string $sourcePng, string $token): void {
-    $files = share_files($token);
-    $source = $sourcePng !== null && is_file($sourcePng)
-        ? @imagecreatefromstring((string) file_get_contents($sourcePng)) : false;
-    try {
-        if ($source !== false) {
-            $page = scale_within($source, SHARE_PAGE_SIDE);
-            imagewebp($page, $files['page'], IMAGE_QUALITY);
-            if ($page !== $source) imagedestroy($page);
-        }
-        $card = $source !== false ? share_og_from_image($source) : share_og_from_garments($snapshot['garments'] ?? []);
-        if ($card !== null) { imagejpeg($card, $files['og'], IMAGE_QUALITY); imagedestroy($card); }
-    } finally {
-        if ($source !== false) imagedestroy($source);
-    }
+function store_share_images(array $snapshot, string $token): void {
+    $card = share_og_from_garments($snapshot['garments'] ?? []);
+    if ($card === null) return;
+    imagejpeg($card, share_files($token)['og'], IMAGE_QUALITY);
+    imagedestroy($card);
 }
 
 /** Shortens free text to fit a meta description without cutting a word in half. */
@@ -206,6 +176,7 @@ function render_share_page(string $token): never {
         + ['name' => 'Un look', 'occasion' => '', 'reason' => '', 'missing_items' => [], 'shopping' => [], 'garments' => [], 'owner_name' => ''];
     $owner = (string) $look['owner_name'];
     $pieces = (array) $look['garments'];
+    // Only links from back when Vestia generated a picture per look have one of these.
     $hasPicture = is_file(share_files($token)['page']);
     // A look whose garments have no photo at all leaves nothing to draw a card from, so the
     // preview falls back to the hero. Only our own card can promise 1200x630.
