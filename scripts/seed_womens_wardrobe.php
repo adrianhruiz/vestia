@@ -77,10 +77,6 @@ $colors = ['Coral','Verde lima','Azul cobalto','Rosa chicle','Lavanda','Amarillo
 $sizes = ['XS','S','M','L'];
 $brandUrls = ['Bershka'=>'https://www.bershka.com/es/','Lefties'=>'https://www.lefties.com/es/'];
 
-$oldJobs = $pdo->prepare('SELECT id FROM jobs WHERE user_id=?');
-$oldJobs->execute([$userId]);
-$jobIds = array_map('intval', array_column($oldJobs->fetchAll(), 'id'));
-
 $pdo->beginTransaction();
 $pdo->prepare('DELETE FROM jobs WHERE user_id=?')->execute([$userId]);
 $pdo->prepare('DELETE FROM garments WHERE user_id=?')->execute([$userId]);
@@ -95,8 +91,4 @@ foreach ($models as $modelIndex => [$name,$category,$image,$season,$basePrice]) 
     $insert->execute([$userId,$name,$brand,sprintf('%04d/%03d/%03d',7000+$modelIndex,100+($modelIndex%2),10+$number),$category,$color,$size,$season,'Prenda ficticia de demostración; colección femenina de estilo urbano y versátil.',$image,thumb_path_for($image),$number <= 8 ? 1 : 0,$number % 9,date(DATE_ATOM),$brandUrls[$brand],number_format($price,2,',','.') . ' €']);
 }
 $pdo->commit();
-
-foreach ($jobIds as $jobId) {
-    foreach (glob(APP_ROOT . '/storage/outfits/job-' . $jobId . '-outfit-*.png') ?: [] as $file) unlink($file);
-}
 echo "Armario de {$email} sustituido por {$number} prendas femeninas ficticias.\n";

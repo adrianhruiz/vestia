@@ -146,11 +146,11 @@ PRE y PROD conservan su flujo habitual.
 ## Estructura
 
 ```
-app/       bootstrap.php (env, sesión, PDO, migraciones) · OpenAI.php (análisis e imágenes)
+app/       bootstrap.php (env, sesión, PDO, migraciones) · OpenAI.php (análisis y lectura de estilo)
 database/  migrations/*.sql (esquema versionado, se aplica solo)
-public/    index.php (front controller) · outfit-image.php · assets/ · uploads/
+public/    index.php (front controller) · share-image.php · assets/ · uploads/
 scripts/   worker.php (cola de jobs) · migrate.php · seed_*.php · import_official_catalog.php
-storage/   official_catalog.json · outfits/ · logs/
+storage/   official_catalog.json · shares/ · logs/
 ```
 
 ## Escaneo de etiquetas (0.0.7)

@@ -235,20 +235,6 @@ if (str_starts_with($path, '/api/')) {
         $stmt=$pdo->prepare("INSERT INTO jobs(user_id,type,fingerprint,status,input_json,created_at) VALUES(?,'wardrobe_analysis',?,'queued',?,?)"); $stmt->execute([$uid,$fingerprint,json_encode($input,JSON_UNESCAPED_UNICODE),date(DATE_ATOM)]);
         json_response(['job_id'=>(int)$pdo->lastInsertId()],202);
     }
-    if (preg_match('#^/api/jobs/(\d+)/outfits/(\d+)/image$#',$path,$m) && $_SERVER['REQUEST_METHOD']==='POST') {
-        require_csrf(); $analysisId=(int)$m[1]; $index=(int)$m[2];
-        $stmt=$pdo->prepare("SELECT result_json FROM jobs WHERE id=? AND user_id=? AND type='wardrobe_analysis' AND status='completed'"); $stmt->execute([$analysisId,$uid]); $raw=$stmt->fetchColumn();
-        if ($raw===false) json_response(['error'=>'Análisis no encontrado.'],404);
-        $outfit=(json_decode((string)$raw,true)['outfits']??[])[$index]??null;
-        if (!is_array($outfit)) json_response(['error'=>'Ese look no existe.'],404);
-        if (!empty($outfit['image_url'])) json_response(['image_url'=>$outfit['image_url'],'ready'=>true]);
-        // Pressing twice must not buy the same picture twice.
-        $payload=json_encode(['analysis_job_id'=>$analysisId,'outfit_index'=>$index]);
-        $stmt=$pdo->prepare("SELECT id FROM jobs WHERE user_id=? AND type='outfit_image' AND status IN ('queued','processing') AND input_json=?"); $stmt->execute([$uid,$payload]);
-        if ($existing=$stmt->fetchColumn()) json_response(['job_id'=>(int)$existing,'existing'=>true],202);
-        $pdo->prepare("INSERT INTO jobs(user_id,type,status,input_json,created_at) VALUES(?,'outfit_image','queued',?,?)")->execute([$uid,$payload,date(DATE_ATOM)]);
-        json_response(['job_id'=>(int)$pdo->lastInsertId()],202);
-    }
     if (preg_match('#^/api/jobs/(\d+)/cancel$#',$path,$m) && $_SERVER['REQUEST_METHOD']==='POST') {
         require_csrf(); $id=(int)$m[1];
         $stmt=$pdo->prepare('SELECT status FROM jobs WHERE id=? AND user_id=?'); $stmt->execute([$id,$uid]); $status=$stmt->fetchColumn();
@@ -308,9 +294,9 @@ if (str_starts_with($path, '/api/')) {
             if ((int)$active->fetchColumn()>=SHARE_MAX_ACTIVE) json_response(['error'=>'Tienes '.SHARE_MAX_ACTIVE.' looks compartidos. Retira alguno para compartir otro.'],409);
             $pdo->prepare('INSERT INTO outfit_shares(user_id,job_id,outfit_index,token,snapshot_json,created_at) VALUES(?,?,?,?,?,?)')->execute([$uid,$analysisId,$index,$token,json_encode($snapshot,JSON_UNESCAPED_UNICODE),date(DATE_ATOM)]);
         }
-        // A picture that cannot be drawn is not a reason to refuse the link: the page falls
-        // back to the collage and the preview to the hero.
-        try { store_share_images($snapshot, empty($outfit['image_url'])?null:APP_ROOT.'/storage/outfits/job-'.$analysisId.'-outfit-'.($index+1).'.png', $token); }
+        // A card that cannot be drawn is not a reason to refuse the link: a look whose
+        // garments have no photo at all falls back to the hero as its preview.
+        try { store_share_images($snapshot, $token); }
         catch (Throwable $e) { error_log('share image failed: '.$e->getMessage()); }
         json_response(['url'=>share_url($token),'token'=>$token,'views'=>0],201);
     }

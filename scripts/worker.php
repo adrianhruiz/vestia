@@ -9,11 +9,7 @@ require APP_ROOT . '/app/StyleReading.php';
 /** Thrown when the user asked to stop a run, so the catch below can tell it from a failure. */
 final class JobCancelled extends RuntimeException {}
 
-/**
- * The analysis: read the wardrobe, ask the stylist. It does not draw anything any more.
- * Generating all five outfit images here meant paying for five pictures on every run, most
- * of which nobody opened; run_outfit_image() draws one when someone asks for it.
- */
+/** The analysis: read the wardrobe, ask the stylist. It does not draw anything. */
 function run_wardrobe_analysis(PDO $pdo, OpenAI $ai, array $job, callable $announce, callable $stopIfCancelled): array {
     $garments = analysis_garments($pdo, (int) $job['user_id']);
     if (count($garments) < 2) throw new RuntimeException('Añade al menos dos prendas antes de analizar.');
@@ -31,50 +27,6 @@ function run_wardrobe_analysis(PDO $pdo, OpenAI $ai, array $job, callable $annou
     $result = $ai->analyze($garments, $preferences, $withShopping, $budget);
     $stopIfCancelled();
     return $result;
-}
-
-/** One picture, for the one look whose card someone pressed. */
-function run_outfit_image(PDO $pdo, OpenAI $ai, array $job, callable $announce, callable $stopIfCancelled): array {
-    $input = json_decode($job['input_json'], true) ?: [];
-    $analysisId = (int) ($input['analysis_job_id'] ?? 0);
-    $index = (int) ($input['outfit_index'] ?? -1);
-
-    $stmt = $pdo->prepare("SELECT result_json FROM jobs WHERE id=? AND user_id=? AND type='wardrobe_analysis' AND status='completed'");
-    $stmt->execute([$analysisId, (int) $job['user_id']]);
-    $outfit = (json_decode((string) $stmt->fetchColumn(), true)['outfits'] ?? [])[$index] ?? null;
-    if (!is_array($outfit)) throw new RuntimeException('Ese look ya no existe.');
-
-    $stopIfCancelled();
-    $announce('Dibujando ' . ($outfit['name'] ?? 'el look'), 40);
-    $image = $ai->outfitImage($outfit, analysis_garments($pdo, (int) $job['user_id']));
-    if ($image === null) throw new RuntimeException('La IA no devolvió ninguna imagen.');
-
-    $name = 'job-' . $analysisId . '-outfit-' . ($index + 1) . '.png';
-    if (file_put_contents(APP_ROOT . '/storage/outfits/' . $name, base64_decode($image, true)) === false) {
-        throw new RuntimeException('No se pudo guardar la imagen.');
-    }
-    $url = '/outfit-image.php?job=' . $analysisId . '&file=' . rawurlencode($name);
-
-    // The analysis result is a shared document from here on, so re-read it under a lock
-    // rather than patching the copy this job started with.
-    $pdo->beginTransaction();
-    try {
-        $stmt = $pdo->prepare('SELECT result_json FROM jobs WHERE id=? FOR UPDATE');
-        $stmt->execute([$analysisId]);
-        $current = json_decode((string) $stmt->fetchColumn(), true) ?: [];
-        if (isset($current['outfits'][$index])) {
-            $current['outfits'][$index]['image_url'] = $url;
-            unset($current['outfits'][$index]['image_error']);
-            $pdo->prepare('UPDATE jobs SET result_json=? WHERE id=?')
-                ->execute([json_encode($current, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), $analysisId]);
-        }
-        $pdo->commit();
-    } catch (Throwable $error) {
-        if ($pdo->inTransaction()) $pdo->rollBack();
-        throw $error;
-    }
-
-    return ['image_url' => $url];
 }
 
 /**
@@ -102,7 +54,7 @@ function run_style_reading(PDO $pdo, OpenAI $ai, array $job, callable $announce,
 
 /** What the bar says before the job has done anything. Each type starts somewhere different. */
 function job_initial_phase(string $type): string {
-    return ['style_reading' => 'Abriendo tus outfits', 'outfit_image' => 'Preparando el lienzo'][$type] ?? 'Leyendo tu armario';
+    return $type === 'style_reading' ? 'Abriendo tus outfits' : 'Leyendo tu armario';
 }
 
 $once = in_array('--once', $argv, true);
@@ -139,7 +91,6 @@ do {
         VestiaLogCapture::$context = ['environment' => basename(APP_ROOT), 'user_id' => (int)$job['user_id'], 'job_id' => (int)$job['id'], 'operation' => (string)$job['type']];
         $ai = new OpenAI($key);
         $result = match ($job['type']) {
-            'outfit_image' => run_outfit_image($pdo, $ai, $job, $announce, $stopIfCancelled),
             'style_reading' => run_style_reading($pdo, $ai, $job, $announce, $stopIfCancelled),
             default => run_wardrobe_analysis($pdo, $ai, $job, $announce, $stopIfCancelled),
         };

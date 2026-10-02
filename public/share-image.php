@@ -1,9 +1,8 @@
 <?php
 declare(strict_types=1);
 // No session: this is the one image endpoint meant to be fetched by strangers and by the
-// preview crawlers of WhatsApp, Telegram, Slack and X, none of which carry a cookie. Its
-// sibling outfit-image.php answers 401 to anyone who is not the owner, which is exactly
-// right there and exactly wrong here. The token is the authorisation.
+// preview crawlers of WhatsApp, Telegram, Slack and X, none of which carry a cookie. The
+// token is the authorisation, and nothing else in the app is served without a session.
 define('VESTIA_NO_SESSION', true);
 require dirname(__DIR__) . '/app/bootstrap.php';
 require dirname(__DIR__) . '/app/Share.php';
@@ -18,6 +17,8 @@ if (!$share) { http_response_code(404); exit; }
 // crawler that cached the URL.
 if ($share['revoked_at'] !== null) { http_response_code(410); exit; }
 
+// 'page' only ever answers for a link created back when Vestia generated a picture of each
+// look; those files stay on disk and their share pages still paint them.
 $variant = ($_GET['v'] ?? 'page') === 'og' ? 'og' : 'page';
 $file = share_files($token)[$variant];
 if (!is_file($file)) { http_response_code(404); exit; }

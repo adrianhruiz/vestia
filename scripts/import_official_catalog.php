@@ -18,10 +18,6 @@ $user->execute([$email]);
 $userId = (int)($user->fetchColumn() ?: 0);
 if (!$userId) throw new RuntimeException("No existe la cuenta {$email}");
 
-$oldJobs = $pdo->prepare('SELECT id FROM jobs WHERE user_id=?');
-$oldJobs->execute([$userId]);
-$jobIds = array_map('intval', array_column($oldJobs->fetchAll(), 'id'));
-
 $pdo->beginTransaction();
 try {
     $pdo->prepare('DELETE FROM jobs WHERE user_id=?')->execute([$userId]);
@@ -36,9 +32,5 @@ try {
 } catch (Throwable $error) {
     if ($pdo->inTransaction()) $pdo->rollBack();
     throw $error;
-}
-
-foreach ($jobIds as $jobId) {
-    foreach (glob(APP_ROOT . '/storage/outfits/job-' . $jobId . '-outfit-*.png') ?: [] as $file) unlink($file);
 }
 echo "Armario de {$email} sustituido por 60 artículos del catálogo oficial.\n";
