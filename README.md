@@ -190,8 +190,9 @@ que comprar.
 
 La petición entra en la huella del análisis, así que cambiar de Café a Fiesta es una pregunta
 nueva y no devuelve la respuesta anterior; repetir la misma petición con el mismo armario sigue
-reutilizando lo ya pagado. Los límites no cambian: dos análisis por hora y cuenta, y el tope
-diario de `OPENAI_MAX_JOBS_PER_DAY`. La cuota se dice dentro de la hoja, antes de componer la
+reutilizando lo ya pagado. El límite por cuenta son cinco análisis por hora —eran dos cuando
+todas las peticiones eran la misma, y con ocasiones distintas se agotaban sin haber repetido
+ninguna—, más el tope diario de `OPENAI_MAX_JOBS_PER_DAY`. La cuota se dice dentro de la hoja, antes de componer la
 petición. Outfits IA muestra para qué se pidió lo que está en pantalla y lista las peticiones
 anteriores; sus looks no se guardan para volver a abrirlos.
 

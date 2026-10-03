@@ -183,8 +183,19 @@ function analysis_fingerprint(array $garments, array $input): string {
     ], JSON_UNESCAPED_UNICODE));
 }
 
-/** How many analyses an ordinary account may start per hour. */
-const ANALYSES_PER_HOUR = 2;
+/**
+ * How many analyses an ordinary account may start per hour.
+ *
+ * Two was the right number while every run asked the same question: a second one in the same
+ * hour was almost always the same analysis, and the fingerprint hands that back for free. With
+ * a brief it is not -- a look for a coffee and a look for a party are two questions, and
+ * somebody trying both plus one of their own styles has spent the hour on the third press
+ * without having repeated themselves once.
+ *
+ * It is still a ceiling and not a budget: OPENAI_MAX_JOBS_PER_DAY is what stops the key being
+ * drained, and this is what stops one account holding the worker.
+ */
+const ANALYSES_PER_HOUR = 5;
 
 /**
  * The analyses this account has spent in the last hour, newest first.
