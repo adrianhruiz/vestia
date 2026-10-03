@@ -78,24 +78,144 @@ if(document.body.dataset.auth==='1'){
  // The unfiltered wardrobe ships inside the page, so the first paint costs no request.
  Array.isArray(window.APP.garments)?renderGarments(window.APP.garments):loadGarments();
  $('#profile-form').addEventListener('submit',async e=>{e.preventDefault();await api('/api/profile',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.fromEntries(new FormData(e.currentTarget)))});toast('Preferencias guardadas')});
- // The budget is about this shopping trip, so it appears with the switch that starts one
- // and is gone the rest of the time.
- const shoppingToggle=$('#want-shopping'),budgetField=$('#budget-field');
- const toggleBudget=()=>{budgetField.hidden=!shoppingToggle.checked};
- shoppingToggle.addEventListener('change',toggleBudget);toggleBudget();
+ // ---- The brief: what the stylist is being asked for today -----------------------------
+ // It is one object and not three loose controls because it is one question, and because it
+ // is what the fingerprint, the history and the result header all have to agree about.
+ const SOURCE_LABELS={wardrobe:'Solo mi armario',both:'Mi armario y tiendas',shops:'Looks de tienda'};
+ const presets=window.APP.style_presets||{};
+ let userStyles=window.APP.styles||[];
+ // The choice as the chips express it: a preset slug, 'custom:<id>', or '' for "my day to day".
+ let occasion='',source='wardrobe';
+ // Resolved once from the last analysis this account ran, which is where the brief in force
+ // is actually kept -- there is no new column for it. The occasion comes back as a label and
+ // not as a row, so it is matched by name, and a style since deleted lands on the day to day.
+ const briefModal=$('#brief-modal'),styleChips=$('#style-chips'),styleNew=$('#style-new'),styleLabel=$('#style-label'),styleError=$('#style-error'),budgetInput=$('#shopping-budget');
+ // All three parts of it, and into the controls as well as into the variables: "Pedir un look"
+ // repeats the brief in force without ever opening the sheet, and it reads the budget off the
+ // box, so a box left empty would quietly drop the budget from the request it is repeating.
+ (function restoreBrief(){
+  const last=window.APP.brief;if(!last)return;
+  source=SOURCE_LABELS[last.source]?last.source:'wardrobe';
+  if(budgetInput&&last.budget)budgetInput.value=last.budget;
+  if(last.occasion){
+   const preset=Object.entries(window.APP.style_presets||{}).find(([,label])=>label===last.occasion);
+   const mine=(window.APP.styles||[]).find(st=>st.label===last.occasion);
+   occasion=preset?preset[0]:mine?'custom:'+mine.id:''
+  }
+ })();
+
+ // The label of whatever is selected, which is the half of a brief a person recognises.
+ const occasionLabel=()=>{
+  if(presets[occasion])return presets[occasion];
+  const mine=userStyles.find(st=>'custom:'+st.id===occasion);
+  return mine?mine.label:''
+ };
+ const chipsHtml=brief=>!brief?'':[brief.occasion||'Mi día a día',SOURCE_LABELS[brief.source]||SOURCE_LABELS.wardrobe]
+  .map(text=>`<span class="chip">${esc(text)}</span>`).join('')+(brief.budget?`<span class="chip">${esc(brief.budget)}</span>`:'');
+
+ // The sidebar: the last request, so repeating it is one click and changing it is two.
+ function renderBriefCard(){
+  const label=occasionLabel();
+  $('#brief-summary').textContent=label?`Tu última petición: ${label.toLowerCase()}.`:'Analiza todo tu armario sin detener la web.';
+  $('#brief-chips').innerHTML=chipsHtml(currentBrief());
+ }
+ // The brief as the controls have it right now, which is also exactly what gets posted.
+ const currentBrief=()=>({occasion:occasionLabel(),source,budget:source==='wardrobe'?'':(budgetInput?.value.trim()||'')});
+
+ // Radios and not buttons with aria-pressed: single choice is what a radiogroup is, and the
+ // arrow keys, the roving focus and the announcement all come for free.
+ const styleChip=(value,label,styleId)=>{
+  const input=`<label><input type="radio" name="occasion" value="${esc(value)}"${value===occasion?' checked':''}><span>${esc(label)}</span></label>`;
+  return styleId===undefined?`<span class="style-chip">${input}</span>`
+   :`<span class="style-chip is-mine">${input}<button type="button" data-forget="${styleId}" aria-label="Borrar el estilo ${esc(label)}">×</button></span>`
+ };
+ function renderStyleChips(){
+  styleChips.innerHTML=styleChip('','Mi día a día')
+   +Object.entries(presets).map(([slug,label])=>styleChip(slug,label)).join('')
+   +userStyles.map(st=>styleChip('custom:'+st.id,st.label,st.id)).join('');
+  $$('input[name=occasion]',styleChips).forEach(input=>input.onchange=()=>{occasion=input.value;hideStyleNew()});
+  $$('[data-forget]',styleChips).forEach(button=>button.onclick=()=>forgetStyle(Number(button.dataset.forget),button));
+  // On a phone the row scrolls sideways, so a chip at the far end of twenty is selected and
+  // off screen -- which is where a style somebody has just saved lands.
+  $('input[name=occasion]:checked',styleChips)?.closest('.style-chip')?.scrollIntoView({block:'nearest',inline:'nearest'});
+ }
+ const styleAdd=$('#style-add');
+ const showStyleNew=open=>{styleNew.hidden=!open;styleError.textContent='';styleAdd?.setAttribute('aria-expanded',open?'true':'false');if(open)styleLabel.focus();else styleLabel.value=''};
+ const hideStyleNew=()=>showStyleNew(false);
+ styleAdd?.addEventListener('click',()=>showStyleNew(styleNew.hidden));
+
+ // Saving a style never fails for being a repeat or for naming something the app already has:
+ // in both cases the answer says which chip to select, which is what the person was after.
+ async function saveStyle(){
+  const label=styleLabel.value.trim();
+  if(!label){styleError.textContent='Escribe el nombre del estilo.';return}
+  const button=$('#style-save');button.disabled=true;
+  try{
+   const d=await api('/api/styles',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({label})});
+   if(d.preset){occasion=d.preset;hideStyleNew();renderStyleChips();toast(`«${presets[d.preset]}» ya estaba: te lo he marcado`);return}
+   if(d.existing)toast('Ya tenías ese estilo guardado');
+   // Appended rather than put first, because that is where user_styles() will have it on the
+   // next load: a style saved and not yet used sorts after every style that has been.
+   userStyles=[...userStyles.filter(st=>st.id!==d.style.id),d.style];
+   occasion='custom:'+d.style.id;hideStyleNew();renderStyleChips()
+  }catch(x){styleError.textContent=x.message}
+  finally{button.disabled=false}
+ }
+ $('#style-save')?.addEventListener('click',saveStyle);
+ // Enter in the box saves instead of submitting the brief, which would ask for a look with a
+ // style that was never created.
+ styleLabel?.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();saveStyle()}if(e.key==='Escape'){e.preventDefault();hideStyleNew()}});
+
+ async function forgetStyle(id,button){
+  const style=userStyles.find(st=>st.id===id);
+  if(!confirm(`¿Borrar el estilo «${style?style.label:''}»? Los looks que ya pediste con él no cambian.`))return;
+  button.disabled=true;
+  try{
+   await api('/api/styles/'+id,{method:'DELETE'});
+   userStyles=userStyles.filter(st=>st.id!==id);
+   // The chip that was selected has just gone, so the choice falls back to the day to day.
+   if(occasion==='custom:'+id)occasion='';
+   renderStyleChips()
+  }catch(x){button.disabled=false;toast(x.message)}
+ }
+
+ // The budget means nothing when nothing is being bought, so it is only there when it does.
+ const sourceInputs=$$('input[name=source]');
+ const applySource=()=>{source=sourceInputs.find(i=>i.checked)?.value||'wardrobe';$('#budget-step').hidden=source==='wardrobe'};
+ sourceInputs.forEach(input=>input.addEventListener('change',applySource));
+
+ // Reopening the sheet shows the brief that is actually in force, whether it came from the
+ // last analysis or from the last time this sheet was used.
+ function openBrief(){
+  sourceInputs.forEach(i=>i.checked=i.value===source);
+  applySource();hideStyleNew();renderStyleChips();
+  $('#brief-error').textContent='';
+  // Said before the brief is composed, not after a 429 has thrown it away.
+  loadQuota();
+  openModal('#brief-modal')
+ }
+ $('#brief-open')?.addEventListener('click',openBrief);
+ $('#analyze-top').onclick=()=>openBrief();
+ $('#brief-form')?.addEventListener('submit',e=>{e.preventDefault();briefModal.hidden=true;startAnalysis()});
+
  const startAnalysis=async(force=false)=>{
   try{
-   const d=await api('/api/analyze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({shopping:$('#want-shopping')?.checked===true,budget:$('#shopping-budget')?.value||'',force})});
+   const brief={occasion,source,budget:budgetInput?.value||''};
+   const d=await api('/api/analyze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({brief,force})});
    // Nothing has changed since the last run, so the answer is already paid for.
    if(d.reused){
-    switchView('outfits');
+    window.APP.brief=d.brief;renderBriefCard();switchView('outfits');
     const when=d.finished_at?new Date(d.finished_at).toLocaleDateString('es-ES',{day:'numeric',month:'long'}):'la última vez';
-    if(confirm(`Tu armario y tu perfil no han cambiado desde el análisis del ${when}, así que el resultado sería el mismo.\n\n¿Quieres gastar un análisis nuevo de todas formas?`))return startAnalysis(true);
+    if(confirm(`Ni tu armario, ni tu perfil, ni esta petición han cambiado desde el análisis del ${when}, así que el resultado sería el mismo.\n\n¿Quieres gastar un análisis nuevo de todas formas?`))return startAnalysis(true);
     toast('Te enseño el análisis anterior');return
    }
-   activeJob=d.job_id;showMini(3);switchView('outfits');startPolling()
-  }catch(x){toast(x.message)}
- };$('#analyze').onclick=()=>startAnalysis();$('#analyze-top').onclick=()=>startAnalysis();
+   window.APP.brief=currentBrief();
+   renderBriefCard();activeJob=d.job_id;showMini(3);switchView('outfits');startPolling()
+  }catch(x){toast(x.message);$('#brief-error').textContent=x.message}
+ };
+ // The sidebar button repeats the brief in force. Changing it is what the sheet is for.
+ $('#analyze').onclick=()=>startAnalysis();
+ renderBriefCard();
  function showMini(p,phase){$('#job-mini').hidden=false;$('.progress i',$('#job-mini')).style.width=p+'%';if(phase)$('#job-mini small').textContent=phase}
  // One chain at a time. Every entry point used to call pollJob() directly, and pollJob
  // re-armed itself without clearing the previous timer, so opening Outfits twice left two
@@ -127,14 +247,70 @@ if(document.body.dataset.auth==='1'){
    catch(x){cancel.disabled=false;toast(x.message)}
   }
  }
+ let analysesLeft;
  function showQuota(left){
-  const el=$('#quota');if(!el)return;
+  analysesLeft=left;
   // null means an exempt account; there is no number worth showing there.
-  el.textContent=left===null||left===undefined?'':left>0?`${left} ${left===1?'análisis restante':'análisis restantes'} esta hora`:'Sin análisis disponibles hasta dentro de un rato';
+  const text=left===null||left===undefined?'':left>0?`${left} ${left===1?'análisis restante':'análisis restantes'} esta hora`:'Sin análisis disponibles hasta dentro de un rato';
+  for(const el of [$('#quota'),$('#brief-quota')])if(el)el.textContent=text;
  }
- async function loadJobs(){const d=await api('/api/jobs'),{jobs,result}=d;showQuota(d.analyses_left);const running=jobs.find(j=>['queued','processing'].includes(j.status));if(running){activeJob=running.id;renderRunning(running);startPolling();return}if(result){resultJobId=d.result_job_id;shares=d.shares||{};renderResult(result);return}const last=jobs[0];$('#jobs').innerHTML=last&&last.status==='failed'?`<div class="job-running"><b>Último análisis fallido</b><p>${esc(last.error)}</p></div>`:last&&last.status==='cancelled'?'<div class="job-running"><b>Análisis cancelado</b><p>Puedes lanzar uno nuevo cuando quieras.</p></div>':'<div class="empty"><b>Aún no hay looks</b><p>Analiza tu armario para crear tus primeras combinaciones.</p></div>'}
- function outfitVisual(o){const pieces=(o.garment_ids||[]).map(id=>garmentCache.find(g=>Number(g.id)===Number(id))).filter(g=>thumbOf(g)).slice(0,4);return pieces.length?`<div class="outfit-collage">${pieces.map(g=>`<img src="${safeAssetUrl(thumbOf(g))}" alt="${esc(g.name)}" loading="lazy" decoding="async">`).join('')}</div>`:'<div class="garment-image outfit-placeholder">✦</div>'}
- function renderResult(r){lastResult=r;$('#jobs').innerHTML=`<section class="analysis-summary"><h2>La lectura de tu armario</h2><p>${esc(r.summary)}</p><div class="chips">${(r.palette||[]).map(x=>`<span class="chip">${esc(x)}</span>`).join('')}</div></section><div class="outfit-grid">${(r.outfits||[]).map((o,i)=>`<article class="outfit">${outfitVisual(o)}<div class="outfit-body"><span class="occasion">${esc(o.occasion)}</span><h3>${esc(o.name)}</h3><p>${esc(o.reason)}</p>${o.missing_items?.length?`<p><b>Para completar:</b> ${esc(o.missing_items.join(', '))}</p>`:''}${o.shopping?.length?`<div class="shopping"><small>COMPRAR EN INDITEX</small>${o.shopping.map(s=>`<a href="${safeUrl(s.url)}" target="_blank" rel="noopener noreferrer sponsored"><span>${esc(s.brand)} · ${esc(s.name)}</span><b>↗</b></a>`).join('')}</div>`:''}<button class="btn btn-soft full share-outfit" data-outfit="${i}">${shares[i]?`↗ Compartido${shares[i].views?` · ${shares[i].views} ${shares[i].views===1?'visita':'visitas'}`:''}`:'↗ Compartir look'}</button></div></article>`).join('')}</div>`;$$('.share-outfit').forEach(b=>b.onclick=()=>openShare(Number(b.dataset.outfit)))}
+ // Said inside the sheet before the brief is composed, so the limit is never a surprise
+ // sprung on somebody who has just finished choosing. One request per session at most:
+ // every loadJobs() refreshes the number afterwards.
+ async function loadQuota(){
+  if(analysesLeft!==undefined){showQuota(analysesLeft);return}
+  try{showQuota((await api('/api/jobs')).analyses_left)}catch{}
+ }
+ const whenText=iso=>{const at=new Date(iso);return isNaN(at)?'':at.toLocaleString('es-ES',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})};
+ // What the looks on screen were asked for. Three briefs in an afternoon give three different
+ // pages of outfits, and without this the only difference between them is their contents.
+ function showResultBrief(brief,when){
+  const el=$('#result-brief');if(!el)return;
+  el.innerHTML=brief?chipsHtml(brief)+(when?`<span class="brief-when">${esc(whenText(when))}</span>`:''):'';
+ }
+ // The requests behind the analyses that are no longer on screen. Their looks are not here:
+ // /api/jobs carries one result_json on purpose, and ten would be the heaviest response in
+ // the app. What it can say for nothing is what each one was for.
+ function renderHistory(jobs){
+  const panel=$('#job-history');if(!panel)return;
+  const past=jobs.filter(j=>j.status==='completed').slice(1);
+  if(!past.length){panel.hidden=true;panel.innerHTML='';return}
+  panel.hidden=false;
+  panel.innerHTML=`<h2>Tus peticiones anteriores</h2><ul>${past.map(j=>`<li>${chipsHtml(j.brief)}<small>${esc(whenText(j.finished_at||j.created_at))}</small></li>`).join('')}</ul>`;
+ }
+ async function loadJobs(){
+  const d=await api('/api/jobs'),{jobs,result}=d;showQuota(d.analyses_left);renderHistory(jobs);
+  const running=jobs.find(j=>['queued','processing'].includes(j.status));
+  if(running){activeJob=running.id;showResultBrief(running.brief,null);renderRunning(running);startPolling();return}
+  if(result){
+   resultJobId=d.result_job_id;shares=d.shares||{};
+   const shown=jobs.find(j=>Number(j.id)===Number(d.result_job_id));
+   showResultBrief(shown?.brief,shown?.finished_at);renderResult(result);return
+  }
+  const last=jobs[0];showResultBrief(last?.brief,null);
+  $('#jobs').innerHTML=last&&last.status==='failed'?`<div class="job-running"><b>Último análisis fallido</b><p>${esc(last.error)}</p></div>`:last&&last.status==='cancelled'?'<div class="job-running"><b>Análisis cancelado</b><p>Puedes lanzar uno nuevo cuando quieras.</p></div>':'<div class="empty"><b>Aún no hay looks</b><p>Dile al estilista para qué quieres vestirte y te monta tus primeras combinaciones.</p></div>'
+ }
+ const outfitPieces=o=>(o.garment_ids||[]).map(id=>garmentCache.find(g=>Number(g.id)===Number(id))).filter(g=>thumbOf(g)).slice(0,4);
+ const shoppingLinks=o=>(o.shopping||[]).map(s=>`<a href="${safeUrl(s.url)}" target="_blank" rel="noopener noreferrer sponsored"><span>${esc(s.brand)} · ${esc(s.name)}</span><b>↗</b></a>`).join('');
+ // A look the shops built has no photographs of its own, because none of it is in the
+ // wardrobe yet. Its pieces are the links, so the links are the head of the card -- under the
+ // ✦ placeholder they read as an afterthought to a picture that was never going to arrive.
+ function outfitVisual(o,pieces){
+  if(pieces.length)return `<div class="outfit-collage">${pieces.map(g=>`<img src="${safeAssetUrl(thumbOf(g))}" alt="${esc(g.name)}" loading="lazy" decoding="async">`).join('')}</div>`;
+  if(o.shopping?.length)return `<div class="outfit-shoplist"><small>COMPRAR PARA ESTE LOOK</small>${shoppingLinks(o)}</div>`;
+  return '<div class="garment-image outfit-placeholder">✦</div>'
+ }
+ function renderResult(r){
+  lastResult=r;
+  const cards=(r.outfits||[]).map((o,i)=>{
+   const pieces=outfitPieces(o);
+   // Already shown as the head of the card: printing them twice is the same list twice.
+   const shopsAreTheLook=!pieces.length&&o.shopping?.length;
+   return `<article class="outfit">${outfitVisual(o,pieces)}<div class="outfit-body"><span class="occasion">${esc(o.occasion)}</span><h3>${esc(o.name)}</h3><p>${esc(o.reason)}</p>${o.missing_items?.length?`<p><b>Para completar:</b> ${esc(o.missing_items.join(', '))}</p>`:''}${o.shopping?.length&&!shopsAreTheLook?`<div class="shopping"><small>COMPRAR EN INDITEX</small>${shoppingLinks(o)}</div>`:''}<button class="btn btn-soft full share-outfit" data-outfit="${i}">${shares[i]?`↗ Compartido${shares[i].views?` · ${shares[i].views} ${shares[i].views===1?'visita':'visitas'}`:''}`:'↗ Compartir look'}</button></div></article>`
+  }).join('');
+  $('#jobs').innerHTML=`<section class="analysis-summary"><h2>La lectura de tu armario</h2><p>${esc(r.summary)}</p><div class="chips">${(r.palette||[]).map(x=>`<span class="chip">${esc(x)}</span>`).join('')}</div></section><div class="outfit-grid">${cards}</div>`;
+  $$('.share-outfit').forEach(b=>b.onclick=()=>openShare(Number(b.dataset.outfit)))
+ }
  // Waiting on the one job the person is standing in front of: the style reading they asked
  // for from "Mi estilo".
  async function waitForJob(id){
