@@ -343,6 +343,9 @@ if (str_starts_with($path, '/api/')) {
 // A shared look. Routed here rather than through a RewriteRule because the built-in server
 // the README starts in local has no .htaccess and falls back to this file on its own.
 if (preg_match('#^/o/([a-f0-9]{32})$#', $path, $m)) render_share_page($m[1]);
+// A link cut short when it was pasted is still somebody's look: say the link is broken
+// rather than open the home page as if nothing had been asked for.
+if (str_starts_with($path, '/o/')) share_error_page(404, 'Este look no existe', 'El enlace no es correcto, o el look nunca llegó a compartirse.');
 
 $currentUser = null; $profile=[]; $garments=null; $sizes=[]; $onboarding=null; $userStyles=[]; $lastBrief=null;
 if ($uid=user_id()) {

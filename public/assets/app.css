@@ -33,12 +33,19 @@
 .share-figure img{display:block;width:100%;height:auto}
 
 /* The hero is the garments themselves: the piece that carries the look takes the big tile,
-   the rest fill around it. Catalogue photos sit on a pale grey, so the tiles do too and
-   contain them instead of cropping a shoe in half. */
-.share-flatlay{margin:0;display:grid;gap:2px;background:var(--line);aspect-ratio:4/5;max-height:600px;width:100%}
+   the rest fill around it. Clothes are worn in their photos and fill their tile, so no shop's
+   studio shows round the edges; a shoe or a bag keeps its whole shape on a tile painted the
+   colour it was shot on (share_photo_backdrop), instead of being cropped in half. */
+.share-flatlay{margin:0;display:grid;gap:3px;background:var(--paper);aspect-ratio:4/5;max-height:600px;width:100%}
 .share-flatlay>*{display:block;background:#f4f4f5;overflow:hidden;min-height:0}
-.share-flatlay img{width:100%;height:100%;object-fit:contain;display:block;transition:transform .5s}
+.share-flatlay img{width:100%;height:100%;object-fit:cover;object-position:50% 20%;display:block;transition:transform .5s}
+/* The photo is sized to itself, not to the tile, so its edges can fade into the backdrop:
+   studio light is brighter in the middle, and a hard edge would still show as a box. Only
+   the outer tenth fades: a product is not always in the middle of its photo. */
+.share-flatlay .is-product{display:grid;grid-template:minmax(0,1fr)/minmax(0,1fr);place-items:center}
+.share-flatlay .is-product img{--fade:linear-gradient(to right,transparent,#000 10%,#000 90%,transparent),linear-gradient(transparent,#000 10%,#000 90%,transparent);width:auto;max-width:100%;object-fit:contain;-webkit-mask-image:var(--fade);-webkit-mask-composite:source-in;mask-image:var(--fade);mask-composite:intersect}
 .share-flatlay a:hover img{transform:scale(1.04)}
+.share-flatlay a:focus-visible{outline:2px solid var(--ink);outline-offset:-4px}
 .share-flatlay[data-count="2"]{grid-template-columns:1fr 1fr;aspect-ratio:1}
 .share-flatlay[data-count="3"],.share-flatlay[data-count="4"],.share-flatlay[data-count="5"]{grid-template-columns:repeat(3,minmax(0,1fr))}
 .share-flatlay[data-count="3"]{grid-template-rows:repeat(2,minmax(0,1fr));aspect-ratio:3/2}
@@ -70,11 +77,12 @@
 .share-piece{display:grid;grid-template-rows:auto 1fr;height:100%;background:#fff;border:1px solid #e8e6df;color:var(--ink);text-decoration:none}
 a.share-piece{transition:transform .2s,box-shadow .2s}
 a.share-piece:hover{transform:translateY(-3px);box-shadow:var(--shadow)}
+a.share-piece:focus-visible{outline:2px solid var(--ink);outline-offset:3px}
 .share-piece figure{margin:0;aspect-ratio:4/5;background:#f4f4f5;overflow:hidden;display:grid;place-items:center;color:#7c857d;font-size:32px}
 .share-piece img{width:100%;height:100%;object-fit:cover;display:block}
 .share-piece div{padding:14px;display:grid;gap:5px;align-content:start}
 .share-piece small{font-size:9px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:var(--coral-ink)}
-.share-piece h3{font:600 17px/1.25 'Playfair Display',serif;margin:0;overflow-wrap:anywhere}
+.share-piece h3{font:600 17px/1.25 'Playfair Display',serif;margin:0;overflow-wrap:break-word}
 .share-piece p{margin:0;font-size:11px;color:var(--muted)}
 .share-piece em{font-style:normal;font-size:11px;font-weight:700;margin-top:6px}
 
@@ -108,8 +116,13 @@ a.share-piece:hover{transform:translateY(-3px);box-shadow:var(--shadow)}
  /* On a phone the title has to show above the fold, so the picture is capped, not tall. */
  .share-flatlay{aspect-ratio:auto!important;height:min(54vh,460px);max-height:none}
  .share-pieces{display:flex;overflow-x:auto;scroll-snap-type:x mandatory;padding:0 clamp(16px,4vw,32px) 8px;margin:0 calc(-1 * clamp(16px,4vw,32px));scroll-padding-inline:clamp(16px,4vw,32px)}
- .share-pieces li{flex:0 0 min(44vw,200px);scroll-snap-align:start}
- .share-how{grid-template-columns:1fr;gap:22px}
+ /* Narrow enough that the next card shows at the edge: the row has to look swipeable. */
+ .share-pieces li{flex:0 0 min(40vw,200px);scroll-snap-align:start}
+ /* Stacked, the steps are a list to skim, not three posters: the number sits beside its step. */
+ .share-how{grid-template-columns:1fr;gap:18px}
+ .share-how li{display:grid;grid-template-columns:30px minmax(0,1fr);padding-top:16px}
+ .share-how .step{grid-row:1/3;padding-top:4px}
+ .share-how h3{font-size:19px;margin:0 0 4px}
  .share-cta{grid-template-columns:1fr}
  .share-go{justify-items:start}}
 @media(max-width:560px){
