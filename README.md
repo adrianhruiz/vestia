@@ -111,11 +111,12 @@ gh pr create --base develop --fill
 El flujo completo —revisión, publicación a producción, hotfixes y convenciones— está en
 **[CONTRIBUTING.md](CONTRIBUTING.md)**.
 
-## Versión 0.0.7 y cuentas de prueba
+## Versión 0.0.8 y cuentas de prueba
 
-El archivo `VERSION` identifica la versión del código desplegado. La cabecera muestra
-«Versión 0.0.7» en la portada, dentro de la aplicación, en el catálogo y en la página
-pública de un look compartido, también en móvil.
+El archivo `VERSION` identifica la versión del código desplegado. Se muestra como
+«Versión 0.0.8» en el menú de cuenta de la aplicación (el avatar) y en la cabecera del
+catálogo. La portada y la página pública de un look compartido no la muestran: es un dato
+para el equipo, no para quien visita.
 Para cambiar la versión en futuros despliegues, actualiza ese archivo en la rama correspondiente.
 
 Los slots `adrian` y `raul` disponen de estas cuentas ficticias; se inicia sesión con el correo:
