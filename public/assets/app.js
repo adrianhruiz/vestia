@@ -118,7 +118,7 @@ if(document.body.dataset.auth==='1'){
  // The sidebar: the last request, so repeating it is one click and changing it is two.
  function renderBriefCard(){
   const label=occasionLabel();
-  $('#brief-summary').textContent=label?`Tu última petición: ${label.toLowerCase()}.`:'Analiza todo tu armario sin detener la web.';
+  $('#brief-summary').textContent=label?`Tu última petición: ${label.toLowerCase()}.`:'Te propone looks con la ropa que ya tienes.';
   $('#brief-chips').innerHTML=chipsHtml(currentBrief());
  }
  // The brief as the controls have it right now, which is also exactly what gets posted.
