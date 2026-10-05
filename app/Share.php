@@ -313,7 +313,7 @@ function render_share_page(string $token): never {
  <?php if ($missingRows): ?>
  <section><div class="share-head"><h2>Para completarlo</h2><?php if (array_filter(array_column($missingRows, 'shop'))): ?><span class="eyebrow">COMPRAR EN INDITEX</span><?php endif ?></div><ul class="share-missing">
   <?php foreach ($missingRows as $row): $shop = $row['shop']; $price = $shop ? share_price((string) $shop['price_note']) : ''; ?>
-  <li><span class="share-need"><?= e($row['need']) ?></span><?php if ($shop): ?><span class="share-shop"><?= e(trim($shop['brand'] . ' · ' . $shop['name'], ' ·')) ?></span><span class="share-buy"><?php if ($price !== ''): ?><b><?= e($price) ?></b><?php endif ?><a class="btn btn-dark" href="<?= e($shop['url']) ?>" target="_blank" rel="noopener noreferrer nofollow sponsored">Ver en <?= e($shop['brand'] !== '' ? $shop['brand'] : 'la tienda') ?> ↗</a></span><?php endif ?></li>
+  <li><span class="share-need"><?= e($row['need']) ?></span><?php if ($shop): ?><span class="share-shop"><?= e($row['need'] === $shop['name'] ? $shop['brand'] : trim($shop['brand'] . ' · ' . $shop['name'], ' ·')) ?></span><span class="share-buy"><?php if ($price !== ''): ?><b><?= e($price) ?></b><?php endif ?><a class="btn btn-dark" href="<?= e($shop['url']) ?>" target="_blank" rel="noopener noreferrer nofollow sponsored">Ver en <?= e($shop['brand'] !== '' ? $shop['brand'] : 'la tienda') ?> ↗</a></span><?php endif ?></li>
   <?php endforeach ?>
  </ul></section>
  <?php endif ?>
