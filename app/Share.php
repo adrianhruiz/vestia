@@ -221,6 +221,40 @@ function share_flatlay(array $pieces): array {
 }
 
 /**
+ * Shoes and bags are shot on their own against a plain background, so in the hero they keep
+ * their whole shape instead of filling the tile. Clothes are photographed on a person and
+ * fill theirs.
+ */
+function share_is_product_shot(array $piece): bool {
+    return in_array($piece['category'] ?? '', ['Calzado', 'Accesorios'], true);
+}
+
+/**
+ * The background a product photo was shot on, read from its corners, so the tile around it
+ * can be painted the same colour. Every shop lights its studio differently, and a tile in the
+ * page's own grey around a photo in a slightly different one shows as a box inside a box.
+ */
+function share_photo_backdrop(string $path): string {
+    $file = share_public_file($path);
+    $image = $file === null ? false : @imagecreatefromstring((string) file_get_contents($file));
+    if ($image === false) return '';
+    $width = imagesx($image); $height = imagesy($image);
+    $sum = [0, 0, 0];
+    foreach ([[1, 1], [$width - 2, 1], [1, $height - 2], [$width - 2, $height - 2]] as [$x, $y]) {
+        $rgb = imagecolorsforindex($image, imagecolorat($image, max(0, $x), max(0, $y)));
+        $sum[0] += $rgb['red']; $sum[1] += $rgb['green']; $sum[2] += $rgb['blue'];
+    }
+    imagedestroy($image);
+    return vsprintf('#%02x%02x%02x', array_map(static fn(int $channel): int => intdiv($channel, 4), $sum));
+}
+
+/** The owner as a name: "adri" is how someone typed it at sign-up, "Adri" is how it reads. */
+function share_owner_name(string $name): string {
+    $name = trim($name);
+    return mb_strtoupper(mb_substr($name, 0, 1)) . mb_substr($name, 1);
+}
+
+/**
  * What the look still needs, each with where to get it. The stylist writes the two lists
  * separately, so they are paired only when they line up one to one; otherwise the needs are
  * listed on their own and every link names its own product.
@@ -261,7 +295,7 @@ function render_share_page(string $token): never {
     // row written by an older version of share_snapshot() must still render.
     $look = (json_decode((string) $share['snapshot_json'], true) ?: [])
         + ['name' => 'Un look', 'occasion' => '', 'reason' => '', 'missing_items' => [], 'shopping' => [], 'garments' => [], 'owner_name' => ''];
-    $owner = (string) $look['owner_name'];
+    $owner = share_owner_name((string) $look['owner_name']);
     $pieces = array_map(static fn($piece): array => (array) $piece
         + ['name' => '', 'brand' => '', 'color' => '', 'category' => '', 'thumb_path' => '', 'source_url' => ''], (array) $look['garments']);
     $reason = share_plain_text((string) $look['reason']);
@@ -295,11 +329,11 @@ function render_share_page(string $token): never {
 <link rel="stylesheet" href="<?= asset('/assets/app.css') ?>"></head>
 <body data-auth="0">
 <?php // No version number here: it means something to us and nothing to a stranger. ?>
-<header class="topbar"><a class="brand" href="/"><span>V</span>Vestia</a><div><?php if ($viewer): ?><a class="btn btn-dark" href="/">Mi armario</a><div class="account"><button class="avatar" id="account-toggle" title="Tu cuenta" aria-haspopup="true" aria-expanded="false" aria-controls="account-menu"><?= e(mb_strtoupper(mb_substr((string) $viewer['name'], 0, 1))) ?></button><div class="account-menu" id="account-menu" role="menu" hidden><div class="account-id"><b><?= e($viewer['name']) ?></b><span><?= e($viewer['email']) ?></span></div><a class="account-item" role="menuitem" href="/">Mi armario</a><button class="account-item danger" role="menuitem" id="logout">Cerrar sesión</button></div></div><?php else: ?><button class="btn btn-ghost" data-open-auth="login">Entrar</button><button class="btn btn-dark" data-open-auth="register">Crear mi armario</button><?php endif ?></div></header>
+<header class="topbar"><a class="brand" href="/"><span>V</span>Vestia</a><div><?php if ($viewer): ?><a class="btn btn-dark" href="/">Mi armario</a><div class="account"><button class="avatar" id="account-toggle" title="Tu cuenta" aria-haspopup="true" aria-expanded="false" aria-controls="account-menu"><?= e(mb_strtoupper(mb_substr((string) $viewer['name'], 0, 1))) ?></button><div class="account-menu" id="account-menu" role="menu" hidden><div class="account-id"><b><?= e($viewer['name']) ?></b><span><?= e($viewer['email']) ?></span></div><a class="account-item" role="menuitem" href="/">Mi armario</a><button class="account-item danger" role="menuitem" id="logout">Cerrar sesión</button></div></div><?php else: ?><button class="btn btn-ghost" data-open-auth="login">Entrar</button><button class="btn btn-coral" data-open-auth="register">Crear mi armario</button><?php endif ?></div></header>
 <main class="share">
  <section class="share-look<?= $flatlay || $hasPicture ? '' : ' is-text' ?>">
   <?php if ($flatlay): ?>
-  <figure class="share-flatlay" data-count="<?= count($flatlay) ?>"><?php foreach ($flatlay as $index => $piece): $link = $productLink($piece); ?><<?= $link !== '' ? 'a href="' . e($link) . '" target="_blank" rel="noopener noreferrer nofollow"' : 'span' ?>><img src="<?= e($piece['thumb_path']) ?>" alt="<?= e(share_display_name((string) $piece['name'])) ?>"<?= $index === 0 ? ' fetchpriority="high"' : '' ?> decoding="async"></<?= $link !== '' ? 'a' : 'span' ?>><?php endforeach ?></figure>
+  <figure class="share-flatlay" data-count="<?= count($flatlay) ?>"><?php foreach ($flatlay as $index => $piece): $link = $productLink($piece); $tile = share_is_product_shot($piece) ? ' class="is-product" style="background:' . e(share_photo_backdrop((string) $piece['thumb_path']) ?: '#fff') . '"' : ''; ?><<?= ($link !== '' ? 'a href="' . e($link) . '" target="_blank" rel="noopener noreferrer nofollow"' : 'span') . $tile ?>><img src="<?= e($piece['thumb_path']) ?>" alt="<?= e(share_display_name((string) $piece['name'])) ?>"<?= $index === 0 ? ' fetchpriority="high"' : '' ?> decoding="async"></<?= $link !== '' ? 'a' : 'span' ?>><?php endforeach ?></figure>
   <?php elseif ($hasPicture): $size = @getimagesize(share_files($token)['page']); ?>
   <figure class="share-figure"><img src="<?= e(share_image_url($token, 'page')) ?>" alt="<?= e($look['name']) ?>"<?= $size ? ' width="' . (int) $size[0] . '" height="' . (int) $size[1] . '"' : '' ?> fetchpriority="high" decoding="async"></figure>
   <?php endif ?>
@@ -308,12 +342,12 @@ function render_share_page(string $token): never {
    <h1><?= e($look['name']) ?></h1>
    <p class="share-owner"><?php if ($owner !== ''): ?><i aria-hidden="true"><?= e(mb_strtoupper(mb_substr($owner, 0, 1))) ?></i><span>Un look de <b><?= e($owner) ?></b>, hecho con su armario real</span><?php else: ?><span>Un look hecho con Vestia a partir de un armario real</span><?php endif ?></p>
    <?php if ($reason !== ''): ?><p class="share-reason"><?= e($reason) ?></p><?php endif ?>
-   <div class="share-act"><?php if ($viewer): ?><a class="btn btn-coral" href="/">Ir a mi armario <b>→</b></a><?php else: ?><div><button class="btn btn-coral" data-open-auth="register">Crear mi armario <b>→</b></button><small>Gratis, sin tarjeta</small></div><?php endif ?><button class="share-copy" type="button" data-copy-link="<?= e(share_url($token)) ?>">Copiar enlace del look</button></div>
+   <div class="share-act"><?php if ($viewer): ?><a class="btn btn-coral" href="/">Ir a mi armario <b>→</b></a><?php else: ?><div><button class="btn btn-coral" data-open-auth="register">Crear mi armario <b>→</b></button><small>Gratis, sin tarjeta</small></div><?php endif ?><button class="share-copy" type="button" data-copy-link="<?= e(share_url($token)) ?>" data-share-label="Compartir este look">Copiar enlace del look</button></div>
   </div>
  </section>
  <?php if ($pieces): ?>
  <section><div class="share-head"><h2>Las prendas del look</h2><span><?= count($pieces) ?> <?= count($pieces) === 1 ? 'prenda' : 'prendas' ?></span></div><ul class="share-pieces">
-  <?php foreach ($pieces as $piece): $link = $productLink($piece); $kind = trim(e((string) $piece['brand']) . ($piece['category'] !== '' && $piece['brand'] !== '' ? ' · ' : '') . e((string) $piece['category'])); ?>
+  <?php foreach ($pieces as $piece): $link = $productLink($piece); $kind = e((string) $piece['brand']); ?>
   <li><<?= $link !== '' ? 'a class="share-piece" href="' . e($link) . '" target="_blank" rel="noopener noreferrer nofollow"' : 'div class="share-piece"' ?>><figure><?php if ($piece['thumb_path'] !== ''): ?><img src="<?= e($piece['thumb_path']) ?>" alt="" loading="lazy" decoding="async"><?php else: ?><span class="garment-placeholder">✦</span><?php endif ?></figure><div><?php if ($kind !== ''): ?><small><?= $kind ?></small><?php endif ?><h3><?= e(share_display_name((string) $piece['name'])) ?></h3><?php if ($piece['color'] !== ''): ?><p><?= e($piece['color']) ?></p><?php endif ?><?php if ($link !== ''): ?><em>Ver en <?= e($piece['brand'] !== '' ? $piece['brand'] : 'la tienda') ?> ↗</em><?php endif ?></div></<?= $link !== '' ? 'a' : 'div' ?>></li>
   <?php endforeach ?>
  </ul></section>

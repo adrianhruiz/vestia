@@ -75,3 +75,32 @@ test('si no cuadran, cada enlace nombra su producto y los enlaces que no son htt
     same(['Camiseta blanca', 'Camiseta fluida', 'Camisa popelín'], array_column($rows, 'need'));
     same(null, $rows[0]['shop']);
 });
+
+describe('share_photo_backdrop()');
+
+test('el fondo de una foto de producto se lee de sus esquinas', function () {
+    $path = '/assets/test-backdrop-' . bin2hex(random_bytes(4)) . '.png';
+    $image = imagecreatetruecolor(40, 50);
+    imagefill($image, 0, 0, imagecolorallocate($image, 0xf4, 0xf3, 0xf6));
+    imagefilledrectangle($image, 10, 10, 30, 40, imagecolorallocate($image, 20, 20, 60));
+    imagepng($image, APP_ROOT . '/public' . $path);
+    imagedestroy($image);
+    try {
+        same('#f4f3f6', share_photo_backdrop($path));
+    } finally {
+        @unlink(APP_ROOT . '/public' . $path);
+    }
+});
+
+test('sin foto legible no hay color que copiar', function () {
+    same('', share_photo_backdrop('/assets/no-existe.webp'));
+    same('', share_photo_backdrop('https://example.com/zapato.jpg'));
+});
+
+describe('share_owner_name()');
+
+test('el nombre de quien comparte empieza en mayúscula', function () {
+    same('Adri', share_owner_name('adri'));
+    same('Álvaro de la Torre', share_owner_name(' álvaro de la Torre'));
+    same('', share_owner_name(''));
+});
