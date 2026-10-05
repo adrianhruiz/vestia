@@ -24,27 +24,98 @@
 .outfit-collage img:only-child{grid-column:1/-1}
 .outfit-placeholder{height:340px}
 
-/* The shared look at /o/{token}. It reuses the wardrobe's own cards and the landing's
-   "Cómo funciona", so a stranger arriving from a chat lands on Vestia, not on a data page. */
-.share{max-width:1080px;margin:0 auto;padding:clamp(28px,5vw,60px) clamp(16px,4vw,32px);display:grid;gap:clamp(36px,6vw,64px)}
-.share-look{display:grid;grid-template-columns:minmax(0,5fr) minmax(0,6fr);gap:clamp(24px,4vw,48px);align-items:start}
+/* The shared look at /o/{token}. It reuses the app's type, colours and buttons, so a stranger
+   arriving from a chat lands on Vestia, not on a data page. */
+.share{max-width:1080px;margin:0 auto;padding:clamp(20px,5vw,56px) clamp(16px,4vw,32px) 0;display:grid;grid-template-columns:minmax(0,1fr);gap:clamp(44px,7vw,80px)}
+.share-look{display:grid;grid-template-columns:minmax(0,5fr) minmax(0,6fr);gap:clamp(24px,4vw,52px);align-items:center}
+.share-look.is-text{grid-template-columns:minmax(0,1fr);max-width:720px}
 .share-figure{margin:0;background:#e6e8df;overflow:hidden}
 .share-figure img{display:block;width:100%;height:auto}
-.share-figure .outfit-collage{height:min(64vh,520px)}
-.share-intro h1{font:600 clamp(36px,5vw,56px)/1.05 'Playfair Display',serif;margin:10px 0 14px;letter-spacing:-1.5px}
-.share-owner{margin:0 0 18px;color:var(--muted);font-size:13px}
-.share-owner b{color:var(--ink)}
-.share-reason{font-size:16px;line-height:1.7;color:#5c6b65;margin:0 0 26px}
-.share-pieces h2,.share-missing h2,.share-cta h2{font:600 clamp(26px,3vw,34px) 'Playfair Display',serif;margin:0 0 20px}
-.share-missing .chips{margin-bottom:18px}
-.share-missing .chip{background:var(--sage);color:var(--ink)}
-.share-missing .shopping{background:#fff;border:1px solid var(--line);padding:18px 22px}
-.share-cta{background:var(--ink);color:#fff;padding:clamp(32px,5vw,56px);text-align:center}
-.share-cta h2{color:#fff}
-.share-cta p{color:#c7d8d1;max-width:520px;margin:0 auto 24px;line-height:1.6}
-.share-cta small{display:block;margin-top:12px;color:#9fb7ae;font-size:11px}
-.share .garment h3{font:600 20px 'Playfair Display',serif;margin:7px 0}
-@media(max-width:900px){.share-look{grid-template-columns:1fr}}
+
+/* The hero is the garments themselves: the piece that carries the look takes the big tile,
+   the rest fill around it. Catalogue photos sit on a pale grey, so the tiles do too and
+   contain them instead of cropping a shoe in half. */
+.share-flatlay{margin:0;display:grid;gap:2px;background:var(--line);aspect-ratio:4/5;max-height:600px;width:100%}
+.share-flatlay>*{display:block;background:#f4f4f5;overflow:hidden;min-height:0}
+.share-flatlay img{width:100%;height:100%;object-fit:contain;display:block;transition:transform .5s}
+.share-flatlay a:hover img{transform:scale(1.04)}
+.share-flatlay[data-count="2"]{grid-template-columns:1fr 1fr;aspect-ratio:1}
+.share-flatlay[data-count="3"],.share-flatlay[data-count="4"],.share-flatlay[data-count="5"]{grid-template-columns:repeat(3,minmax(0,1fr))}
+.share-flatlay[data-count="3"]{grid-template-rows:repeat(2,minmax(0,1fr));aspect-ratio:3/2}
+.share-flatlay[data-count="4"],.share-flatlay[data-count="5"]{grid-template-rows:repeat(3,minmax(0,1fr))}
+.share-flatlay[data-count="3"]>:first-child,.share-flatlay[data-count="4"]>:first-child,.share-flatlay[data-count="5"]>:first-child{grid-column:1/3;grid-row:1/3}
+.share-flatlay[data-count="4"]>:last-child{grid-column:1/-1}
+.share-flatlay[data-count="5"]>:last-child{grid-column:2/4}
+
+.share-intro{min-width:0}
+.share-intro h1{font:600 clamp(36px,5vw,58px)/1.04 'Playfair Display',serif;letter-spacing:-1.5px;margin:12px 0 16px;text-wrap:balance}
+.share-owner{display:flex;align-items:center;gap:10px;margin:0 0 20px;font-size:15px;color:var(--muted)}
+.share-owner i{flex:none;width:30px;height:30px;border-radius:50%;background:var(--coral);color:var(--deep);display:grid;place-items:center;font:600 italic 15px 'Playfair Display',serif}
+.share-owner b{font:600 italic 18px 'Playfair Display',serif;color:var(--ink)}
+.share-reason{font-size:16px;line-height:1.7;color:#5c6b65;margin:0 0 28px;max-width:60ch}
+.share-act{display:flex;flex-wrap:wrap;align-items:center;gap:14px 22px}
+.share-act .btn-coral{padding:15px 22px;font-size:14px}
+.share-act small,.share-go small{display:block;font-size:12px;color:var(--muted);margin-top:6px}
+.share-copy{background:none;border:0;padding:12px 0;font:600 13px 'DM Sans',sans-serif;color:var(--ink);text-decoration:underline;text-underline-offset:4px;cursor:pointer}
+
+/* Section heads carry the count, the one fact the eye wants before scanning a row. */
+.share-head{display:flex;align-items:baseline;justify-content:space-between;gap:6px 12px;margin:0 0 20px}
+.share-head h2{font:600 clamp(26px,3vw,34px) 'Playfair Display',serif;margin:0}
+.share-head>span:not(.eyebrow){font-size:12px;color:var(--muted)}
+
+/* One row of pieces, however many there are, and the whole card is the link. */
+.share-pieces{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px;list-style:none;margin:0;padding:0}
+.share-piece{display:grid;grid-template-rows:auto 1fr;height:100%;background:#fff;border:1px solid #e8e6df;color:var(--ink);text-decoration:none}
+a.share-piece{transition:transform .2s,box-shadow .2s}
+a.share-piece:hover{transform:translateY(-3px);box-shadow:var(--shadow)}
+.share-piece figure{margin:0;aspect-ratio:4/5;background:#f4f4f5;overflow:hidden;display:grid;place-items:center;color:#7c857d;font-size:32px}
+.share-piece img{width:100%;height:100%;object-fit:cover;display:block}
+.share-piece div{padding:14px;display:grid;gap:5px;align-content:start}
+.share-piece small{font-size:9px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:var(--coral-ink)}
+.share-piece h3{font:600 17px/1.25 'Playfair Display',serif;margin:0;overflow-wrap:anywhere}
+.share-piece p{margin:0;font-size:11px;color:var(--muted)}
+.share-piece em{font-style:normal;font-size:11px;font-weight:700;margin-top:6px}
+
+/* What the look still needs and where to get it, read as one line of thought. */
+.share-missing{list-style:none;margin:0;padding:0;background:#fff;border:1px solid var(--line)}
+.share-missing li{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px 20px;align-items:center;padding:20px 22px}
+.share-missing li+li{border-top:1px solid var(--line)}
+.share-need{display:flex;align-items:center;gap:10px;font:600 18px 'Playfair Display',serif}
+.share-need::before{content:"";flex:none;width:18px;height:18px;border:1.5px dashed var(--coral-ink);border-radius:50%}
+.share-shop{grid-column:1;padding-left:28px;font-size:13px;color:#5c6b65;overflow-wrap:anywhere}
+.share-buy{grid-row:1/3;grid-column:2;display:grid;gap:8px;justify-items:end}
+.share-buy b{font:600 22px 'Playfair Display',serif;font-variant-numeric:tabular-nums}
+.share-buy .btn{min-height:44px;display:inline-flex;align-items:center;text-decoration:none}
+
+.share-how{display:grid;grid-template-columns:repeat(3,1fr);gap:clamp(24px,4vw,48px);list-style:none;margin:0;padding:0}
+.share-how li{border-top:1px solid var(--line);padding-top:20px}
+.share-how h3{font:600 23px 'Playfair Display',serif;margin:12px 0 8px}
+.share-how p{color:var(--muted);line-height:1.6;margin:0;font-size:14px}
+
+.share-cta{background:var(--ink);color:#fff;padding:clamp(36px,6vw,64px) clamp(20px,5vw,56px);display:grid;grid-template-columns:minmax(0,1fr) auto;gap:28px;align-items:center}
+.share-cta h2{font:600 clamp(28px,3.4vw,38px)/1.1 'Playfair Display',serif;margin:0 0 10px;text-wrap:balance}
+.share-cta p{color:#c7d8d1;margin:0;line-height:1.6;max-width:46ch}
+.share-go{display:grid;justify-items:center}
+.share-go small{color:#9fb7ae}
+.share-foot{max-width:1080px;margin:0 auto;padding:28px clamp(16px,4vw,32px) 40px;display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px;font-size:12px;color:var(--muted)}
+.share-foot .brand{font-size:18px}
+.share-foot .brand span{width:24px;height:24px;font-size:14px}
+
+@media(max-width:900px){
+ .share-look{grid-template-columns:1fr}
+ /* On a phone the title has to show above the fold, so the picture is capped, not tall. */
+ .share-flatlay{aspect-ratio:auto!important;height:min(54vh,460px);max-height:none}
+ .share-pieces{display:flex;overflow-x:auto;scroll-snap-type:x mandatory;padding:0 clamp(16px,4vw,32px) 8px;margin:0 calc(-1 * clamp(16px,4vw,32px));scroll-padding-inline:clamp(16px,4vw,32px)}
+ .share-pieces li{flex:0 0 min(44vw,200px);scroll-snap-align:start}
+ .share-how{grid-template-columns:1fr;gap:22px}
+ .share-cta{grid-template-columns:1fr}
+ .share-go{justify-items:start}}
+@media(max-width:560px){
+ .share-head{display:grid}
+ .share-missing li{grid-template-columns:1fr}
+ .share-buy{grid-row:auto;grid-column:1;padding-left:28px;display:flex;align-items:center;gap:16px}
+ .share-act>div,.share-act .btn-coral{width:100%;justify-content:center}}
+@media(prefers-reduced-motion:reduce){.share-flatlay img,a.share-piece{transition:none}}
 
 /* Share modal. */
 .share-note{font-size:12px;line-height:1.6;color:var(--muted);margin:0 0 18px}

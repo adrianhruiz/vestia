@@ -10,7 +10,9 @@ const authPassword=$('#auth-password'),passwordToggle=$('#password-toggle');
 const showPassword=show=>{if(!authPassword)return;authPassword.type=show?'text':'password';const label=show?'Ocultar contraseña':'Mostrar contraseña';passwordToggle.setAttribute('aria-pressed',show?'true':'false');passwordToggle.setAttribute('aria-label',label);passwordToggle.title=label};
 passwordToggle?.addEventListener('click',()=>{showPassword(authPassword.type==='password');authPassword.focus()});
 let authMode='login';function setAuth(mode){authMode=mode;showPassword(false);$('#auth-title').textContent=mode==='login'?'Entrar':'Crea tu armario';$('.register-only').style.display=mode==='register'?'grid':'none';$('#auth-switch').textContent=mode==='login'?'¿No tienes cuenta? Crear armario':'Ya tengo cuenta';openModal('#auth-modal')}
-$$('[data-open-auth]').forEach(b=>b.onclick=()=>setAuth(b.dataset.openAuth));$('#auth-switch')?.addEventListener('click',()=>setAuth(authMode==='login'?'register':'login'));
+$$('[data-open-auth]').forEach(b=>b.onclick=()=>setAuth(b.dataset.openAuth));
+// The shared look's own link, for whoever wants to pass it on without going back to the chat.
+$$('[data-copy-link]').forEach(b=>b.onclick=async()=>{try{await navigator.clipboard.writeText(b.dataset.copyLink);toast('Enlace copiado')}catch{toast('Copia el enlace de la barra de direcciones')}});$('#auth-switch')?.addEventListener('click',()=>setAuth(authMode==='login'?'register':'login'));
 $('#auth-form')?.addEventListener('submit',async e=>{e.preventDefault();const f=new FormData(e.currentTarget),body=Object.fromEntries(f);const err=$('.form-error',e.currentTarget);err.textContent='';try{const r=await api('/api/'+authMode,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const next=r.next||window.APP.after_auth;next?location.assign(next):location.reload()}catch(x){err.textContent=x.message}});
 // The avatar used to be the logout button itself, so opening your own account and leaving it
 // were the same click. It opens a menu now, and only the last item in it ends the session.
@@ -306,7 +308,7 @@ if(document.body.dataset.auth==='1'){
    const pieces=outfitPieces(o);
    // Already shown as the head of the card: printing them twice is the same list twice.
    const shopsAreTheLook=!pieces.length&&o.shopping?.length;
-   return `<article class="outfit">${outfitVisual(o,pieces)}<div class="outfit-body"><span class="occasion">${esc(o.occasion)}</span><h3>${esc(o.name)}</h3><p>${esc(o.reason)}</p>${o.missing_items?.length?`<p><b>Para completar:</b> ${esc(o.missing_items.join(', '))}</p>`:''}${o.shopping?.length&&!shopsAreTheLook?`<div class="shopping"><small>COMPRAR EN INDITEX</small>${shoppingLinks(o)}</div>`:''}<button class="btn btn-soft full share-outfit" data-outfit="${i}">${shares[i]?`↗ Compartido${shares[i].views?` · ${shares[i].views} ${shares[i].views===1?'visita':'visitas'}`:''}`:'↗ Compartir look'}</button></div></article>`
+   return `<article class="outfit">${outfitVisual(o,pieces)}<div class="outfit-body"><span class="occasion">${esc(o.occasion)}</span><h3>${esc(o.name)}</h3><p>${esc(plainText(o.reason))}</p>${o.missing_items?.length?`<p><b>Para completar:</b> ${esc(o.missing_items.join(', '))}</p>`:''}${o.shopping?.length&&!shopsAreTheLook?`<div class="shopping"><small>COMPRAR EN INDITEX</small>${shoppingLinks(o)}</div>`:''}<button class="btn btn-soft full share-outfit" data-outfit="${i}">${shares[i]?`↗ Compartido${shares[i].views?` · ${shares[i].views} ${shares[i].views===1?'visita':'visitas'}`:''}`:'↗ Compartir look'}</button></div></article>`
   }).join('');
   $('#jobs').innerHTML=`<section class="analysis-summary"><h2>La lectura de tu armario</h2><p>${esc(r.summary)}</p><div class="chips">${(r.palette||[]).map(x=>`<span class="chip">${esc(x)}</span>`).join('')}</div></section><div class="outfit-grid">${cards}</div>`;
   $$('.share-outfit').forEach(b=>b.onclick=()=>openShare(Number(b.dataset.outfit)))
@@ -590,5 +592,7 @@ if(document.body.dataset.auth==='1'){
  renderOnboarding();
  loadJobs();
 }
-function esc(v=''){const d=document.createElement('div');d.textContent=String(v);return d.innerHTML}function safeUrl(u=''){try{const x=new URL(u);return x.protocol==='https:'?x.href:'#'}catch{return '#'}}function safeAssetUrl(u=''){try{const x=new URL(u,location.origin);return x.origin===location.origin?x.href:'#'}catch{return '#'}}function thumbOf(g){return g?.thumb_path||g?.image_path||''}function garmentIcon(category=''){return {'Partes de arriba':'♙','Partes de abajo':'♜','Vestidos':'♕','Abrigos':'♖','Calzado':'♢','Accesorios':'○'}[category]||'♧'}
+// The stylist cites its web sources as markdown links; a citation in brackets goes whole and any
+// other link keeps its words. Same rule as share_plain_text() in app/Share.php.
+function plainText(v=''){return String(v).replace(/\s*\(\[[^\]]*\]\([^)\s]*\)\)/g,'').replace(/\[([^\]]*)\]\([^)\s]*\)/g,'$1').replace(/ {2,}/g,' ').trim()}function esc(v=''){const d=document.createElement('div');d.textContent=String(v);return d.innerHTML}function safeUrl(u=''){try{const x=new URL(u);return x.protocol==='https:'?x.href:'#'}catch{return '#'}}function safeAssetUrl(u=''){try{const x=new URL(u,location.origin);return x.origin===location.origin?x.href:'#'}catch{return '#'}}function thumbOf(g){return g?.thumb_path||g?.image_path||''}function garmentIcon(category=''){return {'Partes de arriba':'♙','Partes de abajo':'♜','Vestidos':'♕','Abrigos':'♖','Calzado':'♢','Accesorios':'○'}[category]||'♧'}
 
