@@ -115,7 +115,7 @@ if(document.body.dataset.auth==='1'){
   return mine?mine.label:''
  };
  const chipsHtml=brief=>!brief?'':[brief.occasion||'Mi día a día',SOURCE_LABELS[brief.source]||SOURCE_LABELS.wardrobe]
-  .map(text=>`<span class="chip">${esc(text)}</span>`).join('')+(brief.budget?`<span class="chip">${esc(brief.budget)}</span>`:'');
+  .map(text=>`<span class="chip">${esc(text)}</span>`).join('')+(brief.budget?`<span class="chip">Hasta ${esc(brief.budget)} €</span>`:'');
 
  // The sidebar: the last request, so repeating it is one click and changing it is two.
  function renderBriefCard(){
