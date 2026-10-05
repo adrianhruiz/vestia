@@ -19,6 +19,8 @@ const SHARE_OG_WIDTH = 1200;
 const SHARE_OG_HEIGHT = 630;
 /** Garments drawn into the preview card of a look. */
 const SHARE_OG_PIECES = 4;
+/** Garments laid out in the hero of a shared look: a big tile and the four around it. */
+const SHARE_FLATLAY_PIECES = 5;
 /** Links one account may keep alive at once, so the endpoint is not unlimited storage. */
 const SHARE_MAX_ACTIVE = 50;
 
@@ -85,12 +87,12 @@ function share_snapshot(array $outfit, array $garments, string $ownerName): arra
     foreach ($outfit['shopping'] ?? [] as $item) {
         if (!is_array($item)) continue;
         $shopping[] = ['brand' => (string) ($item['brand'] ?? ''), 'name' => (string) ($item['name'] ?? ''),
-            'url' => (string) ($item['url'] ?? ''), 'price_note' => (string) ($item['price_note'] ?? '')];
+            'url' => (string) ($item['url'] ?? ''), 'price_note' => share_plain_text((string) ($item['price_note'] ?? ''))];
     }
     return [
         'name' => (string) ($outfit['name'] ?? 'Un look'),
         'occasion' => (string) ($outfit['occasion'] ?? ''),
-        'reason' => (string) ($outfit['reason'] ?? ''),
+        'reason' => share_plain_text((string) ($outfit['reason'] ?? '')),
         'missing_items' => array_values(array_filter((array) ($outfit['missing_items'] ?? []), 'is_string')),
         'shopping' => $shopping, 'garments' => $pieces, 'owner_name' => $ownerName,
     ];
@@ -158,6 +160,83 @@ function share_excerpt(string $text, int $length = 155): string {
     return rtrim($space === false ? $cut : mb_substr($cut, 0, $space), ' .,;:') . '…';
 }
 
+/**
+ * The stylist searches the web and cites what it found the way a chat does, as markdown:
+ * "…en blanco. ([massimodutti.com](https://…))". On a page of plain text that is a raw URL
+ * in the middle of a sentence. A citation in brackets goes whole; any other link keeps its
+ * words.
+ */
+function share_plain_text(string $text): string {
+    $text = preg_replace('/\s*\(\[[^\]]*\]\([^)\s]*\)\)/u', '', $text) ?? $text;
+    $text = preg_replace('/\[([^\]]*)\]\([^)\s]*\)/u', '$1', $text) ?? $text;
+    return trim(preg_replace('/ {2,}/', ' ', $text) ?? $text);
+}
+
+/**
+ * The price out of a price note, which is a sentence ("Verificado en web oficial de Bershka:
+ * 29,99 €, color negro… dentro del presupuesto de 100 €"). The first amount that is not the
+ * budget is the price; a note with no amount has no price to show, and says nothing.
+ */
+function share_price(string $note): string {
+    if (!preg_match_all('/(?<![\d.,])\d+(?:[.,]\d{3})*(?:[.,]\d{2})?\s?€/u', $note, $found, PREG_OFFSET_CAPTURE)) return '';
+    foreach ($found[0] as [$amount, $offset]) {
+        if (str_contains(mb_strtolower(substr($note, max(0, $offset - 30), min(30, $offset))), 'presupuesto')) continue;
+        return (string) preg_replace('/\s?€$/u', "\u{00A0}€", $amount);
+    }
+    return '';
+}
+
+/**
+ * Catalogue names arrive in the shop's own capitals: "DEPORTIVO TECNICO", "Cazadora acolchada
+ * THERMAL RESISTANCE". Set in a serif next to each other they shout, so a name in capitals
+ * becomes a sentence, and a word in capitals inside a name becomes a word.
+ */
+function share_display_name(string $name): string {
+    $letters = (string) preg_replace('/\P{L}/u', '', $name);
+    if ($letters !== '' && mb_strtoupper($letters) === $letters && mb_strlen($letters) > 3) {
+        $lower = mb_strtolower($name);
+        return mb_strtoupper(mb_substr($lower, 0, 1)) . mb_substr($lower, 1);
+    }
+    return (string) preg_replace_callback('/(?<!\p{L})\p{Lu}{4,}(?!\p{L})/u',
+        static fn(array $word): string => mb_substr($word[0], 0, 1) . mb_strtolower(mb_substr($word[0], 1)), $name);
+}
+
+/**
+ * The pieces with a photo, in the order the hero lays them out: the piece that carries the
+ * look takes the big tile, and shoes go last, where the wide tile at the bottom fits them.
+ */
+function share_flatlay(array $pieces): array {
+    $photos = array_values(array_filter($pieces, static fn(array $piece): bool => ($piece['thumb_path'] ?? '') !== ''));
+    if (!$photos) return [];
+    $rank = static function (array $piece): int {
+        $order = array_search($piece['category'] ?? '', ['Abrigos', 'Vestidos', 'Partes de arriba', 'Partes de abajo', 'Accesorios', 'Calzado'], true);
+        return $order === false ? 4 : $order;
+    };
+    $lead = 0;
+    foreach ($photos as $index => $piece) if ($rank($piece) < $rank($photos[$lead])) $lead = $index;
+    $rest = $photos;
+    array_splice($rest, $lead, 1);
+    usort($rest, static fn(array $a, array $b): int => (($a['category'] ?? '') === 'Calzado') <=> (($b['category'] ?? '') === 'Calzado'));
+    return array_slice([$photos[$lead], ...$rest], 0, SHARE_FLATLAY_PIECES);
+}
+
+/**
+ * What the look still needs, each with where to get it. The stylist writes the two lists
+ * separately, so they are paired only when they line up one to one; otherwise the needs are
+ * listed on their own and every link names its own product.
+ */
+function share_missing_rows(array $missing, array $shopping): array {
+    $shopping = array_values(array_filter(array_map(
+        static fn($item): array => (array) $item + ['brand' => '', 'name' => '', 'url' => '', 'price_note' => ''], $shopping),
+        static fn(array $item): bool => str_starts_with((string) $item['url'], 'https://')));
+    $missing = array_values(array_filter($missing, 'is_string'));
+    if (count($missing) === count($shopping)) {
+        return array_map(static fn(string $need, array $item): array => ['need' => $need, 'shop' => $item], $missing, $shopping);
+    }
+    return [...array_map(static fn(string $need): array => ['need' => $need, 'shop' => null], $missing),
+        ...array_map(static fn(array $item): array => ['need' => (string) $item['name'], 'shop' => $item], $shopping)];
+}
+
 /** The look at /o/{token}, or the branded 404/410 when there is nothing to show. */
 function render_share_page(string $token): never {
     $stmt = db()->prepare('SELECT id,token,snapshot_json,revoked_at FROM outfit_shares WHERE token=?');
@@ -175,15 +254,21 @@ function render_share_page(string $token): never {
     $look = (json_decode((string) $share['snapshot_json'], true) ?: [])
         + ['name' => 'Un look', 'occasion' => '', 'reason' => '', 'missing_items' => [], 'shopping' => [], 'garments' => [], 'owner_name' => ''];
     $owner = (string) $look['owner_name'];
-    $pieces = (array) $look['garments'];
-    // Only links from back when Vestia generated a picture per look have one of these.
-    $hasPicture = is_file(share_files($token)['page']);
+    $pieces = array_map(static fn($piece): array => (array) $piece
+        + ['name' => '', 'brand' => '', 'color' => '', 'category' => '', 'thumb_path' => '', 'source_url' => ''], (array) $look['garments']);
+    $reason = share_plain_text((string) $look['reason']);
+    $flatlay = share_flatlay($pieces);
+    // Only links from back when Vestia generated a picture per look have one of these. The
+    // real garments come first even then: that picture drew clothes the person does not own.
+    $hasPicture = !$flatlay && is_file(share_files($token)['page']);
+    $missingRows = share_missing_rows((array) $look['missing_items'], (array) $look['shopping']);
     // A look whose garments have no photo at all leaves nothing to draw a card from, so the
     // preview falls back to the hero. Only our own card can promise 1200x630.
     $hasCard = is_file(share_files($token)['og']);
     $ogImage = $hasCard ? share_image_url($token, 'og') : base_url() . asset('/assets/hero/wardrobe-hero-1100.jpg');
     $title = $look['name'] . ($owner !== '' ? ' — un look de ' . $owner : '') . ' | Vestia';
-    $description = share_excerpt((string) ($look['reason'] ?? '')) ?: 'Un look creado con Vestia a partir de un armario real.';
+    $description = share_excerpt($reason) ?: 'Un look creado con Vestia a partir de un armario real.';
+    $productLink = static fn(array $piece): string => str_starts_with((string) ($piece['source_url'] ?? ''), 'https://') ? (string) $piece['source_url'] : '';
     http_response_code(200);
     header('Content-Type: text/html; charset=utf-8');
     ?><!doctype html>
@@ -201,34 +286,41 @@ function render_share_page(string $token): never {
 <link rel="preload" as="font" type="font/woff2" href="/assets/fonts/dm-sans-latin.woff2" crossorigin><link rel="preload" as="font" type="font/woff2" href="/assets/fonts/playfair-display-latin.woff2" crossorigin>
 <link rel="stylesheet" href="<?= asset('/assets/app.css') ?>"></head>
 <body data-auth="0">
-<header class="topbar"><a class="brand" href="/"><span>V</span><div class="brand-label">Vestia<small class="app-version">Versión <?= e(trim((string) file_get_contents(APP_ROOT . '/VERSION'))) ?></small></div></a><nav><a href="#how">Cómo funciona</a></nav><div><button class="btn btn-ghost" data-open-auth="login">Entrar</button><button class="btn btn-dark" data-open-auth="register">Crear armario</button></div></header>
+<?php // No version number here: it means something to us and nothing to a stranger. ?>
+<header class="topbar"><a class="brand" href="/"><span>V</span>Vestia</a><div><button class="btn btn-ghost" data-open-auth="login">Entrar</button><button class="btn btn-dark" data-open-auth="register">Crear mi armario</button></div></header>
 <main class="share">
- <section class="share-look">
-  <figure class="share-figure"><?php if ($hasPicture): $size = @getimagesize(share_files($token)['page']); ?><img src="<?= e(share_image_url($token, 'page')) ?>" alt="<?= e($look['name']) ?>"<?= $size ? ' width="' . (int) $size[0] . '" height="' . (int) $size[1] . '"' : '' ?> fetchpriority="high" decoding="async"><?php else: ?><div class="outfit-collage"><?php foreach (array_slice($pieces, 0, 4) as $piece): if (($piece['thumb_path'] ?? '') === '') continue; ?><img src="<?= e($piece['thumb_path']) ?>" alt="<?= e($piece['name']) ?>" decoding="async"><?php endforeach ?></div><?php endif ?></figure>
+ <section class="share-look<?= $flatlay || $hasPicture ? '' : ' is-text' ?>">
+  <?php if ($flatlay): ?>
+  <figure class="share-flatlay" data-count="<?= count($flatlay) ?>"><?php foreach ($flatlay as $index => $piece): $link = $productLink($piece); ?><<?= $link !== '' ? 'a href="' . e($link) . '" target="_blank" rel="noopener noreferrer nofollow"' : 'span' ?>><img src="<?= e($piece['thumb_path']) ?>" alt="<?= e(share_display_name((string) $piece['name'])) ?>"<?= $index === 0 ? ' fetchpriority="high"' : '' ?> decoding="async"></<?= $link !== '' ? 'a' : 'span' ?>><?php endforeach ?></figure>
+  <?php elseif ($hasPicture): $size = @getimagesize(share_files($token)['page']); ?>
+  <figure class="share-figure"><img src="<?= e(share_image_url($token, 'page')) ?>" alt="<?= e($look['name']) ?>"<?= $size ? ' width="' . (int) $size[0] . '" height="' . (int) $size[1] . '"' : '' ?> fetchpriority="high" decoding="async"></figure>
+  <?php endif ?>
   <div class="share-intro">
-   <?php if (($look['occasion'] ?? '') !== ''): ?><span class="eyebrow"><?= e(mb_strtoupper($look['occasion'])) ?></span><?php endif ?>
+   <?php if ($look['occasion'] !== ''): ?><span class="eyebrow"><?= e(mb_strtoupper((string) $look['occasion'])) ?></span><?php endif ?>
    <h1><?= e($look['name']) ?></h1>
-   <p class="share-owner"><?= $owner !== '' ? 'Un look de <b>' . e($owner) . '</b>, ' : 'Un look ' ?>creado con Vestia a partir de su armario real.</p>
-   <p class="share-reason"><?= e((string) ($look['reason'] ?? '')) ?></p>
-   <button class="btn btn-coral" data-open-auth="register">Crear mi armario <b>→</b></button>
+   <p class="share-owner"><?php if ($owner !== ''): ?><i aria-hidden="true"><?= e(mb_strtoupper(mb_substr($owner, 0, 1))) ?></i><span>Un look de <b><?= e($owner) ?></b>, hecho con su armario real</span><?php else: ?><span>Un look hecho con Vestia a partir de un armario real</span><?php endif ?></p>
+   <?php if ($reason !== ''): ?><p class="share-reason"><?= e($reason) ?></p><?php endif ?>
+   <div class="share-act"><div><button class="btn btn-coral" data-open-auth="register">Crear mi armario <b>→</b></button><small>Gratis, sin tarjeta</small></div><button class="share-copy" type="button" data-copy-link="<?= e(share_url($token)) ?>">Copiar enlace del look</button></div>
   </div>
  </section>
  <?php if ($pieces): ?>
- <section class="share-pieces"><h2>Las prendas del look</h2><div class="garment-grid">
-  <?php foreach ($pieces as $piece): ?>
-  <article class="garment"><div class="garment-image"><?php if (($piece['thumb_path'] ?? '') !== ''): ?><img src="<?= e($piece['thumb_path']) ?>" alt="<?= e($piece['name']) ?>" loading="lazy" decoding="async"><?php else: ?><span class="garment-placeholder">✦</span><?php endif ?></div><div class="garment-body"><span class="garment-brand"><?= e($piece['brand']) ?></span><h3><?= e($piece['name']) ?></h3><div class="garment-meta"><?= e($piece['color']) ?></div><?php if (($piece['source_url'] ?? '') !== '' && str_starts_with($piece['source_url'], 'https://')): ?><a class="product-source" href="<?= e($piece['source_url']) ?>" target="_blank" rel="noopener noreferrer nofollow">Ver producto real ↗</a><?php endif ?></div></article>
+ <section><div class="share-head"><h2>Las prendas del look</h2><span><?= count($pieces) ?> <?= count($pieces) === 1 ? 'prenda' : 'prendas' ?></span></div><ul class="share-pieces">
+  <?php foreach ($pieces as $piece): $link = $productLink($piece); $kind = trim(e((string) $piece['brand']) . ($piece['category'] !== '' && $piece['brand'] !== '' ? ' · ' : '') . e((string) $piece['category'])); ?>
+  <li><<?= $link !== '' ? 'a class="share-piece" href="' . e($link) . '" target="_blank" rel="noopener noreferrer nofollow"' : 'div class="share-piece"' ?>><figure><?php if ($piece['thumb_path'] !== ''): ?><img src="<?= e($piece['thumb_path']) ?>" alt="" loading="lazy" decoding="async"><?php else: ?><span class="garment-placeholder">✦</span><?php endif ?></figure><div><?php if ($kind !== ''): ?><small><?= $kind ?></small><?php endif ?><h3><?= e(share_display_name((string) $piece['name'])) ?></h3><?php if ($piece['color'] !== ''): ?><p><?= e($piece['color']) ?></p><?php endif ?><?php if ($link !== ''): ?><em>Ver en <?= e($piece['brand'] !== '' ? $piece['brand'] : 'la tienda') ?> ↗</em><?php endif ?></div></<?= $link !== '' ? 'a' : 'div' ?>></li>
   <?php endforeach ?>
- </div></section>
+ </ul></section>
  <?php endif ?>
- <?php if ($look['missing_items'] || $look['shopping']): ?>
- <section class="share-missing"><h2>Para completarlo</h2>
-  <?php if ($look['missing_items']): ?><div class="chips"><?php foreach ($look['missing_items'] as $item): ?><span class="chip"><?= e($item) ?></span><?php endforeach ?></div><?php endif ?>
-  <?php if ($look['shopping']): ?><div class="shopping"><small>COMPRAR EN INDITEX</small><?php foreach ($look['shopping'] as $item): if (!str_starts_with($item['url'], 'https://')) continue; ?><a href="<?= e($item['url']) ?>" target="_blank" rel="noopener noreferrer nofollow sponsored"><span><?= e($item['brand']) ?> · <?= e($item['name']) ?></span><b>↗</b></a><?php endforeach ?></div><?php endif ?>
- </section>
+ <?php if ($missingRows): ?>
+ <section><div class="share-head"><h2>Para completarlo</h2><?php if (array_filter(array_column($missingRows, 'shop'))): ?><span class="eyebrow">COMPRAR EN INDITEX</span><?php endif ?></div><ul class="share-missing">
+  <?php foreach ($missingRows as $row): $shop = $row['shop']; $price = $shop ? share_price((string) $shop['price_note']) : ''; ?>
+  <li><span class="share-need"><?= e($row['need']) ?></span><?php if ($shop): ?><span class="share-shop"><?= e(trim($shop['brand'] . ' · ' . $shop['name'], ' ·')) ?></span><span class="share-buy"><?php if ($price !== ''): ?><b><?= e($price) ?></b><?php endif ?><a class="btn btn-dark" href="<?= e($shop['url']) ?>" target="_blank" rel="noopener noreferrer nofollow sponsored">Ver en <?= e($shop['brand'] !== '' ? $shop['brand'] : 'la tienda') ?> ↗</a></span><?php endif ?></li>
+  <?php endforeach ?>
+ </ul></section>
  <?php endif ?>
- <section class="how" id="how"><div><span class="step">01</span><h2>Fotografía o escanea</h2><p>Añade la foto y la referencia de la etiqueta de cada prenda.</p></div><div><span class="step">02</span><h2>Define tu estilo</h2><p>Dinos qué te gusta, qué evitas y para qué ocasiones vistes.</p></div><div><span class="step">03</span><h2>Descubre tus looks</h2><p>La IA analiza en segundo plano y combina la ropa que ya tienes.</p></div></section>
- <section class="share-cta"><h2>Tu armario también tiene algo que decir</h2><p>Digitaliza tus prendas y deja que Vestia te proponga combinaciones con lo que ya tienes.</p><button class="btn btn-coral" data-open-auth="register">Crear mi armario gratis</button><small>Sin tarjeta</small></section>
+ <section><div class="share-head"><h2>Cómo se hizo este look</h2></div><ol class="share-how"><li><span class="step">01</span><h3>Fotografía o escanea</h3><p>Añade la foto y la referencia de la etiqueta de cada prenda.</p></li><li><span class="step">02</span><h3>Define tu estilo</h3><p>Dinos qué te gusta, qué evitas y para qué ocasiones vistes.</p></li><li><span class="step">03</span><h3>Descubre tus looks</h3><p>La IA combina la ropa que ya tienes y te dice qué falta.</p></li></ol></section>
+ <section class="share-cta"><div><h2>Tu armario también tiene algo que decir</h2><p>Digitaliza tus prendas y deja que Vestia te proponga combinaciones con lo que ya tienes.</p></div><div class="share-go"><button class="btn btn-coral" data-open-auth="register">Crear mi armario</button><small>Gratis, sin tarjeta</small></div></section>
 </main>
+<footer class="share-foot"><a class="brand" href="/"><span>V</span>Vestia</a><span><?= $owner !== '' ? 'Look compartido por ' . e($owner) . ' · ' : '' ?>Las prendas enlazan a la tienda oficial</span></footer>
 <div class="modal" id="auth-modal" hidden><div class="modal-card auth-card"><button class="close" data-close>×</button><span class="eyebrow">BIENVENIDO A VESTIA</span><h2 id="auth-title">Entrar</h2><form id="auth-form"><label class="register-only">Nombre<input name="name" autocomplete="name"></label><label>Email<input type="email" name="email" required autocomplete="email"></label><label>Contraseña<input type="password" name="password" required minlength="10" autocomplete="current-password"></label><button class="btn btn-coral full">Continuar</button><p class="form-error"></p></form><button class="text-btn" id="auth-switch">¿No tienes cuenta? Crear armario</button></div></div>
 <div id="toast" role="status"></div>
 <?php // Registering here lands on an empty wardrobe, which is the worst possible answer to
@@ -243,7 +335,7 @@ function share_error_page(int $status, string $title, string $text): never {
     header('Content-Type: text/html; charset=utf-8');
     ?><!doctype html>
 <html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><title><?= e($title) ?> | Vestia</title><link rel="stylesheet" href="<?= asset('/assets/app.css') ?>"></head>
-<body><header class="topbar"><a class="brand" href="/"><span>V</span><div class="brand-label">Vestia</div></a><div><a class="btn btn-dark" href="/">Crear armario</a></div></header>
+<body><header class="topbar"><a class="brand" href="/"><span>V</span><div class="brand-label">Vestia</div></a><div><a class="btn btn-dark" href="/">Crear mi armario</a></div></header>
 <main class="share"><section class="empty"><b><?= e($title) ?></b><p><?= e($text) ?></p></section></main></body></html>
 <?php
     exit;
