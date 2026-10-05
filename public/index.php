@@ -12,6 +12,7 @@ require dirname(__DIR__) . '/app/LabelScan.php';
 require dirname(__DIR__) . '/app/SignupLimit.php';
 require dirname(__DIR__) . '/app/StyleReading.php';
 require dirname(__DIR__) . '/app/Onboarding.php';
+require dirname(__DIR__) . '/app/Styles.php';
 require dirname(__DIR__) . '/app/Analysis.php';
 require dirname(__DIR__) . '/app/Share.php';
 
@@ -199,6 +200,26 @@ if (str_starts_with($path, '/api/')) {
         if ($found===null) json_response(['error'=>'Ese enlace no es de una tienda de Inditex. Pega el de la ficha del producto, o añade la prenda con una foto.'],422);
         json_response(['garment'=>$found]);
     }
+    // The occasions somebody added themselves. The presets are not here: they ship in
+    // app/Styles.php and travel inside the page, so the chips need no request to paint.
+    if ($path === '/api/styles' && $_SERVER['REQUEST_METHOD'] === 'GET') json_response(['styles'=>user_styles($pdo,$uid)]);
+    if ($path === '/api/styles' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+        require_csrf(); $d=request_json();
+        $label=is_scalar($d['label']??null)?(string)$d['label']:'';
+        $answer=user_style_create($pdo,$uid,$label);
+        // Writing a name the app already knows is not a failure, and neither is writing one
+        // you saved last week: both answers tell the client which chip to select.
+        if (($answer['error']??'')==='empty') json_response(['error'=>'Escribe el nombre del estilo.'],422);
+        if (($answer['error']??'')==='full') json_response(['error'=>'Ya tienes '.USER_STYLES_MAX.' estilos propios. Borra uno para añadir otro.'],422);
+        json_response($answer);
+    }
+    if (preg_match('#^/api/styles/(\d+)$#',$path,$m) && $_SERVER['REQUEST_METHOD']==='DELETE') {
+        require_csrf();
+        if (!user_style_delete($pdo,$uid,(int)$m[1])) json_response(['error'=>'Ese estilo ya no está en tu lista.'],404);
+        // Nothing cascades: the analyses asked for under this name keep saying so, because
+        // what they stored was the label and not this row.
+        json_response(['ok'=>true]);
+    }
     if ($path === '/api/style-reading' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         require_csrf();
         // It used to be a multipart upload of photographs of the person, with every rule that
@@ -215,22 +236,26 @@ if (str_starts_with($path, '/api/')) {
         json_response(['job_id'=>style_reading_queue($pdo,$uid,$outfits)],202);
     }
     if ($path === '/api/analyze' && $_SERVER['REQUEST_METHOD'] === 'POST') {
-        require_csrf(); $count = (int)$pdo->query("SELECT COUNT(*) FROM garments WHERE user_id={$uid}")->fetchColumn();
-        if ($count < 2) json_response(['error'=>'Añade al menos dos prendas.'],422);
+        require_csrf(); $body=request_json();
+        $count = (int)$pdo->query("SELECT COUNT(*) FROM garments WHERE user_id={$uid}")->fetchColumn();
+        // What was asked, resolved before anything is spent: how many garments a brief needs
+        // depends on where it said the clothes may come from.
+        $brief=analysis_brief($pdo,$uid,$body);
+        if ($blocked=analysis_blocked($brief,$count)) json_response(['error'=>$blocked],422);
         $active = $pdo->prepare("SELECT id FROM jobs WHERE user_id=? AND type='wardrobe_analysis' AND status IN ('queued','processing')"); $active->execute([$uid]); if ($job=$active->fetch()) json_response(['job_id'=>(int)$job['id'],'existing'=>true]);
         $stmt=$pdo->prepare('SELECT id,email,is_test,style_profile FROM users WHERE id=?'); $stmt->execute([$uid]); $user=$stmt->fetch();
         $wait=analysis_retry_after($pdo,$user?:[]);
         if ($wait!==null) json_response(['error'=>'Has usado tus '.ANALYSES_PER_HOUR.' análisis de esta hora. El siguiente estará disponible a las '.date('H:i',time()+$wait).'.','retry_after'=>$wait],429);
         $profile=json_decode($user['style_profile']?:'{}',true);
         // The request body used to be array_merge'd in raw and stored, so anything a client
-        // posted became prompt we paid for. It gets the same six capped keys as the form.
-        $body=request_json();
-        $input=['preferences'=>style_profile($body,$profile?:[]),'shopping'=>!empty($body['shopping']),'budget'=>analysis_budget($body)];
+        // posted became prompt we paid for. It gets the same four capped keys as the form,
+        // and the brief alongside: who they are, and what they are asking for today.
+        $input=['preferences'=>style_profile($body,$profile?:[]),'brief'=>$brief];
         $fingerprint=analysis_fingerprint(analysis_garments($pdo,$uid),$input);
         // Same wardrobe, same profile, same question: the answer is already upstairs.
         if (empty($body['force'])) {
             $stmt=$pdo->prepare("SELECT id,finished_at FROM jobs WHERE user_id=? AND type='wardrobe_analysis' AND status='completed' AND fingerprint=? ORDER BY id DESC LIMIT 1"); $stmt->execute([$uid,$fingerprint]);
-            if ($previous=$stmt->fetch()) json_response(['reused'=>true,'job_id'=>(int)$previous['id'],'finished_at'=>$previous['finished_at']]);
+            if ($previous=$stmt->fetch()) json_response(['reused'=>true,'job_id'=>(int)$previous['id'],'finished_at'=>$previous['finished_at'],'brief'=>$brief]);
         }
         $stmt=$pdo->prepare("INSERT INTO jobs(user_id,type,fingerprint,status,input_json,created_at) VALUES(?,'wardrobe_analysis',?,'queued',?,?)"); $stmt->execute([$uid,$fingerprint,json_encode($input,JSON_UNESCAPED_UNICODE),date(DATE_ATOM)]);
         json_response(['job_id'=>(int)$pdo->lastInsertId()],202);
@@ -253,7 +278,11 @@ if (str_starts_with($path, '/api/')) {
     if ($path === '/api/jobs' && $_SERVER['REQUEST_METHOD'] === 'GET') {
         // The list is metadata only. It used to carry result_json for all ten analyses when
         // the only one ever rendered is the newest completed, so that one travels apart.
-        $stmt=$pdo->prepare("SELECT id,status,progress,phase,error,created_at,finished_at FROM jobs WHERE user_id=? AND type='wardrobe_analysis' ORDER BY id DESC LIMIT 10"); $stmt->execute([$uid]); $jobs=$stmt->fetchAll();
+        $stmt=$pdo->prepare("SELECT id,status,progress,phase,error,created_at,finished_at,input_json FROM jobs WHERE user_id=? AND type='wardrobe_analysis' ORDER BY id DESC LIMIT 10"); $stmt->execute([$uid]); $jobs=$stmt->fetchAll();
+        // input_json rides along where result_json deliberately does not: it is a profile and
+        // a brief, so every row can say what it was asked for without a second request. The
+        // raw column does not leave, only the brief read out of it.
+        foreach($jobs as $i=>$j){ $jobs[$i]['brief']=analysis_brief_stored(json_decode((string)$j['input_json'],true)?:[]); unset($jobs[$i]['input_json']); }
         $latest=null; foreach($jobs as $j) if($j['status']==='completed'){$latest=(int)$j['id']; break;}
         $result=null;
         if($latest){ $stmt=$pdo->prepare('SELECT result_json FROM jobs WHERE id=? AND user_id=?'); $stmt->execute([$latest,$uid]); $raw=$stmt->fetchColumn(); $result=$raw?json_decode($raw,true):null; }
@@ -315,7 +344,7 @@ if (str_starts_with($path, '/api/')) {
 // the README starts in local has no .htaccess and falls back to this file on its own.
 if (preg_match('#^/o/([a-f0-9]{32})$#', $path, $m)) render_share_page($m[1]);
 
-$currentUser = null; $profile=[]; $garments=null; $sizes=[]; $onboarding=null;
+$currentUser = null; $profile=[]; $garments=null; $sizes=[]; $onboarding=null; $userStyles=[]; $lastBrief=null;
 if ($uid=user_id()) {
     $stmt=db()->prepare('SELECT id,name,email,style_profile,onboarding_done_at FROM users WHERE id=?');$stmt->execute([$uid]);$currentUser=$stmt->fetch();$profile=json_decode($currentUser['style_profile']??'{}',true)?:[];
     // The unfiltered wardrobe travels with the page: the grid used to need a round trip
@@ -326,6 +355,13 @@ if ($uid=user_id()) {
     // after the grid, asking for two outfits, reads as an interruption rather than as the
     // first thing to do. Only while it is still owed -- it is two queries nobody else needs.
     if (onboarding_pending($currentUser)) $onboarding=onboarding_state(db(),$uid);
+    // The chips of the brief, and the brief itself, so the sidebar can show the last request
+    // on the first paint. The last one is read from the newest analysis rather than stored
+    // anywhere new: it is already in that job's input_json, and reading it back means the
+    // same request shows up on whatever device this person opens next.
+    $userStyles=user_styles(db(),$uid);
+    $stmt=db()->prepare("SELECT input_json FROM jobs WHERE user_id=? AND type='wardrobe_analysis' ORDER BY id DESC LIMIT 1");$stmt->execute([$uid]);
+    if ($raw=$stmt->fetchColumn()) $lastBrief=analysis_brief_stored(json_decode((string)$raw,true)?:[]);
 }
 $garmentCount = $garments === null ? 0 : count($garments);
 ?><!doctype html>
@@ -336,9 +372,9 @@ $garmentCount = $garments === null ? 0 : count($garments);
 <main><section class="hero"><div class="hero-copy"><div class="eyebrow">Tu estilo. Mejor pensado.</div><h1>Tu armario tiene<br><em>mucho que decir.</em></h1><p>Digitaliza tus prendas, descubre nuevas combinaciones y recibe recomendaciones inteligentes basadas en tu estilo real.</p><div class="hero-actions"><button class="btn btn-coral" data-open-auth="register">Crear mi armario <b>→</b></button><span>Gratis para empezar<br><small>Sin tarjeta</small></span></div><div class="trust"><strong>Inditex first</strong><span>ZARA</span><span>Massimo Dutti</span><span>Oysho</span><span>+4 marcas</span></div></div><div class="hero-image"><?php $heroWidths = [480, 768, 1100, 1586]; $heroSizes = '(max-width:900px) 100vw, 54vw'; ?><picture><source type="image/avif" srcset="<?= e(srcset('/assets/hero/wardrobe-hero-%d.avif', $heroWidths)) ?>" sizes="<?= $heroSizes ?>"><source type="image/webp" srcset="<?= e(srcset('/assets/hero/wardrobe-hero-%d.webp', $heroWidths)) ?>" sizes="<?= $heroSizes ?>"><img src="<?= asset('/assets/hero/wardrobe-hero-1100.jpg') ?>" srcset="<?= e(srcset('/assets/hero/wardrobe-hero-%d.jpg', $heroWidths)) ?>" sizes="<?= $heroSizes ?>" width="1586" height="992" fetchpriority="high" decoding="async" alt="Armario cápsula organizado"></picture><div class="floating-card"><i>✦</i><div><b>Look de hoy</b><span>3 prendas tuyas · 18°C</span></div></div></div></section>
 <section class="how" id="how"><div><span class="step">01</span><h2>Fotografía o escanea</h2><p>Añade la foto y la referencia de la etiqueta de cada prenda.</p></div><div><span class="step">02</span><h2>Monta dos outfits</h2><p>Con dos looks tuyos, el estilista lee tu estilo y escribe tu perfil.</p></div><div><span class="step">03</span><h2>Descubre tus looks</h2><p>La IA analiza en segundo plano y crea outfits con enlaces verificados.</p></div></section></main>
 <?php else: ?>
-<main class="app-shell"><aside><div class="welcome"><span>BUENOS DÍAS</span><div class="greeting"><?= e(explode(' ',$currentUser['name'])[0]) ?>.</div><p>¿Qué quieres ponerte hoy?</p></div><button class="side-link active" data-view="wardrobe">▦ <span>Mi armario</span></button><button class="side-link" data-view="outfits">✦ <span>Outfits IA</span></button><button class="side-link" data-view="profile">◌ <span>Mi estilo</span></button><?php if(catalog_admin()): ?><a class="side-link" href="/catalog.php" style="text-decoration:none" aria-label="Catálogo Inditex">▤ <span>Catálogo Inditex</span></a><?php endif ?><div class="ai-card"><b>✦ Estilista IA</b><p>Analiza todo tu armario sin detener la web.</p><label class="ai-option"><input type="checkbox" id="want-shopping"> Buscar prendas que faltan en tiendas</label><label class="ai-budget" id="budget-field" hidden>Presupuesto<input id="shopping-budget" maxlength="<?= ANALYSIS_BUDGET_MAX_LENGTH ?>" placeholder="Hasta 120 €"></label><button class="btn btn-coral full" id="analyze">Analizar armario</button><small id="quota" class="quota"></small><div id="job-mini" hidden><div class="progress"><i></i></div><small>Preparando recomendaciones…</small></div></div></aside>
+<main class="app-shell"><aside><div class="welcome"><span>BUENOS DÍAS</span><div class="greeting"><?= e(explode(' ',$currentUser['name'])[0]) ?>.</div><p>¿Qué quieres ponerte hoy?</p></div><button class="side-link active" data-view="wardrobe">▦ <span>Mi armario</span></button><button class="side-link" data-view="outfits">✦ <span>Outfits IA</span></button><button class="side-link" data-view="profile">◌ <span>Mi estilo</span></button><?php if(catalog_admin()): ?><a class="side-link" href="/catalog.php" style="text-decoration:none" aria-label="Catálogo Inditex">▤ <span>Catálogo Inditex</span></a><?php endif ?><?php // The card used to hold the whole request -- a switch, a budget and a button -- in 250px. It holds the answer to it now, and the request has a sheet of its own. ?><div class="ai-card"><b>✦ Estilista IA</b><p id="brief-summary">Analiza todo tu armario sin detener la web.</p><div class="brief-chips" id="brief-chips"></div><button class="btn btn-coral full" id="analyze">Pedir un look</button><button type="button" class="text-btn brief-change" id="brief-open">Cambiar la petición</button><small id="quota" class="quota"></small><div id="job-mini" hidden><div class="progress"><i></i></div><small>Preparando recomendaciones…</small></div></div></aside>
 <section class="workspace view active" id="view-wardrobe"><div class="page-head"><div><span class="eyebrow">COLECCIÓN PERSONAL</span><h1>Mi armario</h1><p id="garment-count"><?= $garmentCount ?> <?= $garmentCount===1?'prenda':'prendas' ?> en tu colección</p></div><button class="btn btn-dark" id="add-garment">＋ Añadir prenda</button></div><?php // Painted by app.js from window.APP.onboarding, like the grid below it. ?><section class="onboarding-panel" id="onboarding-panel" hidden></section><div class="toolbar"><label class="search">⌕ <input id="search" placeholder="Buscar por prenda o referencia…"></label><select id="category-filter"><option value="">Todas las categorías</option><?php foreach(GARMENT_CATEGORIES as $c): ?><option><?= e($c) ?></option><?php endforeach ?></select><button class="btn btn-soft" id="add-from-shop">Escanear etiqueta</button></div><div id="garment-grid" class="garment-grid"></div></section>
-<section class="workspace view" id="view-outfits"><div class="page-head"><div><span class="eyebrow">RECOMENDACIONES PERSONALES</span><h1>Tus outfits</h1><p>Combinaciones con las prendas que ya tienes.</p></div><button class="btn btn-coral" id="analyze-top">✦ Nuevo análisis</button></div><div id="jobs" class="jobs"><div class="empty"><b>Aún no hay looks</b><p>Analiza tu armario para crear tus primeras combinaciones.</p></div></div></section>
+<section class="workspace view" id="view-outfits"><div class="page-head"><div><span class="eyebrow">RECOMENDACIONES PERSONALES</span><h1>Tus outfits</h1><?php // Painted by app.js: what was asked for, so three requests in a row are told apart. ?><div class="brief-chips" id="result-brief"></div></div><button class="btn btn-coral" id="analyze-top">✦ Nueva petición</button></div><div id="jobs" class="jobs"><div class="empty"><b>Aún no hay looks</b><p>Dile al estilista para qué quieres vestirte y te monta tus primeras combinaciones.</p></div></div><section class="job-history" id="job-history" hidden></section></section>
 <section class="workspace view" id="view-profile"><div class="page-head"><div><span class="eyebrow">PERFIL DE ESTILO</span><h1>Cuéntale a Vestia quién eres</h1><p>Cuanto más contexto, mejores serán tus recomendaciones.</p></div><button class="btn btn-soft" id="reread-style">✦ Que lo lea el estilista</button></div><form id="profile-form" class="profile-form"><label>Tu estilo<textarea name="style" placeholder="Minimalista, casual sofisticado, urbano…"><?= e($profile['style']??'') ?></textarea></label><label>Colores que te gustan<input name="colors" value="<?= e($profile['colors']??'') ?>" placeholder="Verde, negro, tonos tierra…"></label><label>Evitar<input name="avoid" value="<?= e($profile['avoid']??'') ?>" placeholder="Estampados, prendas ajustadas…"></label><label>Ocasiones frecuentes<input name="occasions" value="<?= e($profile['occasions']??'') ?>" placeholder="Trabajo, fin de semana, cenas…"></label><button class="btn btn-dark">Guardar preferencias</button></form></section></main>
 <?php endif ?>
 <div class="modal" id="auth-modal" hidden><div class="modal-card auth-card"><button class="close" data-close>×</button><span class="eyebrow">BIENVENIDO A VESTIA</span><h2 id="auth-title">Entrar</h2><form id="auth-form"><label class="register-only">Nombre<input name="name" autocomplete="name"></label><label>Email<input type="email" name="email" required autocomplete="email"></label><label>Contraseña<div class="password-field"><input type="password" name="password" id="auth-password" required minlength="10" autocomplete="current-password"><button type="button" class="password-toggle" id="password-toggle" aria-pressed="false" aria-label="Mostrar contraseña" title="Mostrar contraseña"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M1.9 12S5.9 5.5 12 5.5 22.1 12 22.1 12 18.1 18.5 12 18.5 1.9 12 1.9 12Z"></path><circle cx="12" cy="12" r="3.2"></circle><line class="eye-slash" x1="4" y1="20" x2="20" y2="4"></line></svg></button></div></label><button class="btn btn-coral full">Continuar</button><p class="form-error"></p></form><button class="text-btn" id="auth-switch">¿No tienes cuenta? Crear armario</button></div></div>
@@ -353,6 +389,16 @@ $garmentCount = $garments === null ? 0 : count($garments);
 <p id="label-status" role="status" aria-live="polite"></p><div id="label-results" class="label-results"></div>
 <label id="label-use-photo" class="label-use-photo" hidden><input type="checkbox" name="use_catalog_image" value="1">Usar foto oficial</label>
 </section><p class="link-lead" id="link-lead">También puedes pegar el enlace de la tienda o completar los datos manualmente.</p><div class="link-row"><input id="link-url" inputmode="url" placeholder="https://www.zara.com/es/…"><button type="button" class="btn btn-dark" id="link-fetch">Traer datos</button></div><label class="dropzone"><input type="file" name="image" accept="image/jpeg,image/png,image/webp" capture="environment"><img class="upload-preview" alt="Vista previa de la prenda" hidden><b>＋ Añadir foto</b><span>JPG, PNG o WebP · máx. 8 MB</span></label><div class="form-grid"><label>Nombre<input name="name" required placeholder="Camisa fluida"></label><label>Marca<select name="brand" required><?php foreach(GARMENT_BRANDS as $b): ?><option><?= e($b) ?></option><?php endforeach ?></select></label><label>Referencia de etiqueta<input name="reference" placeholder="Ej. 7545/043/800"></label><label>Categoría<select name="category" required><?php foreach(GARMENT_CATEGORIES as $c): ?><option><?= e($c) ?></option><?php endforeach ?></select></label><label>Color<input name="color" placeholder="Crudo"></label><label>Talla<input name="size" list="link-sizes" placeholder="M"><datalist id="link-sizes"></datalist></label><label>Temporada<select name="season"><option>Todo el año</option><option>Primavera / verano</option><option>Otoño / invierno</option></select></label><label>Notas<input name="notes" placeholder="Corte oversize, lino…"></label></div><button class="btn btn-dark full">Guardar prenda</button><p class="form-error"></p></form></div></div>
+<?php if($currentUser): ?><div class="modal" id="brief-modal" hidden><div class="modal-card wide brief-card"><button class="close" data-close>×</button><span class="eyebrow">PETICIÓN AL ESTILISTA</span><h2>¿Qué te apetece hoy?</h2><form id="brief-form">
+<fieldset class="brief-step"><legend><span>1</span> ¿Para qué?</legend><div class="style-row"><div class="style-chips" id="style-chips" role="radiogroup" aria-label="Ocasión del look"></div><?php // Outside the radiogroup: it is not one of the choices, it is how you add one. ?><button type="button" class="style-add" id="style-add" aria-label="Añadir un estilo propio" aria-expanded="false">＋</button></div><div class="style-new" id="style-new" hidden><input id="style-label" maxlength="<?= STYLE_LABEL_MAX_LENGTH ?>" placeholder="Biblioteca, terraceo, concierto…" autocomplete="off" aria-label="Nombre del estilo"><button type="button" class="btn btn-dark" id="style-save">Guardar</button></div><p class="form-error" id="style-error"></p></fieldset>
+<fieldset class="brief-step"><legend><span>2</span> ¿De dónde sale la ropa?</legend><div class="source-options">
+<label class="source-option"><input type="radio" name="source" value="wardrobe" checked><b>Solo mi armario</b><small>Combino lo que ya tienes.</small></label>
+<label class="source-option"><input type="radio" name="source" value="both"><b>Mi armario y tiendas</b><small>Completo con lo que te falte.</small></label>
+<label class="source-option"><input type="radio" name="source" value="shops"><b>Sorpréndeme con tiendas</b><small>El look lo montan ellas; tu armario es la referencia de tu estilo.</small></label>
+</div></fieldset>
+<fieldset class="brief-step" id="budget-step" hidden><legend><span>3</span> Presupuesto</legend><label class="brief-budget">Lo que estás dispuesta o dispuesto a gastar<input id="shopping-budget" maxlength="<?= ANALYSIS_BUDGET_MAX_LENGTH ?>" placeholder="Hasta 120 €"></label></fieldset>
+<div class="brief-foot"><small id="brief-quota"></small><button class="btn btn-coral" id="brief-submit">Crear mis outfits</button></div><p class="form-error" id="brief-error"></p></form></div></div>
+<?php endif ?>
 <?php if($currentUser): ?><div class="modal" id="reading-modal" hidden><div class="modal-card"><button class="close" data-close>×</button><span class="eyebrow">ESTO ES LO QUE HE VISTO</span><h2>Tu estilo, en tus palabras</h2><p class="onboarding-lead" id="reading-summary"></p><p class="onboarding-hint">Cámbialo si no te reconoces: es tu perfil, y el estilista trabajará con lo que quede aquí. «Evitar» no sale de tus outfits, así que esa la escribes tú.</p><form id="reading-form" class="profile-form"><label>Tu estilo<textarea name="style" placeholder="Minimalista, casual sofisticado, urbano…"></textarea></label><label>Colores que te gustan<input name="colors" placeholder="Verde, negro, tonos tierra…"></label><label>Ocasiones frecuentes<input name="occasions" placeholder="Trabajo, fin de semana, cenas…"></label><label>Evitar<input name="avoid" placeholder="Estampados, prendas ajustadas…"></label><button class="btn btn-dark">Guardar y seguir</button><p class="form-error"></p></form></div></div>
 <div class="modal" id="share-modal" hidden><div class="modal-card"><button class="close" data-close>×</button><span class="eyebrow">COMPARTIR LOOK</span><h2 id="share-title">Compartir</h2><p class="share-note">Cualquiera con el enlace podrá ver este look y las prendas que lo componen. El resto de tu armario y de tu análisis no se comparte.</p><label class="share-link">Enlace<input id="share-url" readonly value="Creando el enlace…"></label><div class="share-actions"><button class="btn btn-dark" id="share-copy">Copiar enlace</button><button class="btn btn-coral" id="share-native" hidden>Compartir…</button></div><p class="share-stats" id="share-stats"></p><button class="text-btn" id="share-revoke" hidden>Dejar de compartir</button><p class="form-error"></p></div></div><?php endif ?>
-<div id="toast" role="status"></div><script>window.APP=<?= json_encode(['csrf'=>csrf_token(),'garments'=>$garments,'sizes'=>$sizes,'onboarding'=>$onboarding,'categories'=>GARMENT_CATEGORIES], JSON_UNESCAPED_UNICODE|JSON_HEX_TAG|JSON_HEX_AMP|JSON_HEX_APOS|JSON_HEX_QUOT) ?>;</script><script src="<?= asset('/assets/app.js') ?>"></script></body></html>
+<div id="toast" role="status"></div><script>window.APP=<?= json_encode(['csrf'=>csrf_token(),'garments'=>$garments,'sizes'=>$sizes,'onboarding'=>$onboarding,'categories'=>GARMENT_CATEGORIES,'style_presets'=>array_map(static fn(array $preset): string => $preset['label'], STYLE_PRESETS),'styles'=>$userStyles,'brief'=>$lastBrief===null?null:array_diff_key($lastBrief,['guidance'=>null])], JSON_UNESCAPED_UNICODE|JSON_HEX_TAG|JSON_HEX_AMP|JSON_HEX_APOS|JSON_HEX_QUOT) ?>;</script><script src="<?= asset('/assets/app.js') ?>"></script></body></html>

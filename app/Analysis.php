@@ -1,6 +1,11 @@
 <?php
 declare(strict_types=1);
 
+// analysis_brief() resolves an occasion against STYLE_PRESETS and against this account's own
+// styles, so the vocabulary is a real dependency and not something a caller has to remember
+// to load first.
+require_once __DIR__ . '/Styles.php';
+
 /**
  * How much of a free-text note the stylist needs. It is the only unbounded thing a person
  * writes per garment, and up to forty of them ride in every prompt.
@@ -35,26 +40,134 @@ function analysis_garments(PDO $pdo, int $userId): array {
 const ANALYSIS_BUDGET_MAX_LENGTH = 120;
 
 /**
- * What this person is willing to spend completing a look, or '' when they are not shopping.
+ * Where the clothes in a proposed look are allowed to come from.
  *
- * It used to be a box in the style profile, which is the wrong place: "hasta 120 €" is an
+ * It used to be a boolean -- search the shops or do not -- which could say "only what I own"
+ * and "what I own, plus what is missing" but had no way of saying "I do not want to use my
+ * wardrobe today, dress me from the shops". That third answer is a different question for the
+ * model, not a louder version of the second, so the flag became three named values.
+ *
+ * 'wardrobe' is first because it is the one that spends nothing: no web search, no tokens
+ * paid for its results. Anything unrecognised lands there too.
+ */
+const ANALYSIS_SOURCES = ['wardrobe', 'both', 'shops'];
+
+/** One of ANALYSIS_SOURCES, whatever arrived. An unknown value is not an error, it is 'wardrobe'. */
+function analysis_source(mixed $value): string {
+    return in_array($value, ANALYSIS_SOURCES, true) ? (string) $value : 'wardrobe';
+}
+
+/**
+ * What this person is willing to spend completing a look, or '' when nothing is being bought.
+ *
+ * It used to be a box in the style profile, which is the wrong place: "hasta 120 EUR" is an
  * answer to what somebody is buying today, not a property of who they are, and asked at
  * registration -- before there was anything to complete -- it got a number nobody meant.
  *
- * Read only when the shopping switch is on. With it off nothing is being bought, so a figure
- * left over in the form has no business reaching the prompt, and none reaching the
+ * Read only when the clothes may come from a shop. With 'wardrobe' nothing is being bought, so
+ * a figure left over in the form has no business reaching the prompt, and none reaching the
  * fingerprint either: two runs that differ by an unused number are the same run.
  */
-function analysis_budget(array $body): string {
-    if (empty($body['shopping'])) return '';
-    return mb_substr(trim((string) ($body['budget'] ?? '')), 0, ANALYSIS_BUDGET_MAX_LENGTH);
+function analysis_budget(array $brief): string {
+    if (analysis_source($brief['source'] ?? '') === 'wardrobe') return '';
+    $budget = $brief['budget'] ?? '';
+    if (!is_scalar($budget)) return '';
+    return mb_substr(trim((string) $budget), 0, ANALYSIS_BUDGET_MAX_LENGTH);
+}
+
+/**
+ * The request itself, normalised: what for, from where, and for how much.
+ *
+ * This is the one thing the stylist is asked that is about today rather than about the person,
+ * which is why it travels apart from `preferences` all the way down -- into input_json, into
+ * the fingerprint and into the prompt as data.
+ *
+ * An occasion arrives as a STYLE_PRESETS slug, as 'custom:<id>' naming one of this account's
+ * own styles, or as nothing at all, which is the ordinary "dress me for my day" and the
+ * behaviour this app had before briefs existed. What is kept is the *label*, never the id: a
+ * style somebody deletes and names again is the same request, and the looks already saved
+ * under it keep saying what they were for.
+ *
+ * The one write: choosing a style of your own marks it as used, which is what moves its chip
+ * to the front of the row next time. It happens here because here is where the choice is
+ * understood, and it is as true of a reused answer as of a fresh one -- they still asked for it.
+ */
+function analysis_brief(PDO $pdo, int $userId, array $body): array {
+    $raw = is_array($body['brief'] ?? null) ? $body['brief'] : [];
+    $source = analysis_source($raw['source'] ?? '');
+    $brief = ['occasion' => '', 'guidance' => '', 'source' => $source, 'budget' => analysis_budget(['source' => $source, 'budget' => $raw['budget'] ?? ''])];
+
+    // Key order is fixed across every branch and across analysis_brief_stored(): the
+    // fingerprint hashes the JSON of this array, so two identical briefs written in a
+    // different order would be two different questions.
+    $occasion = is_scalar($raw['occasion'] ?? null) ? trim((string) $raw['occasion']) : '';
+    if (isset(STYLE_PRESETS[$occasion])) {
+        $brief['occasion'] = STYLE_PRESETS[$occasion]['label'];
+        $brief['guidance'] = STYLE_PRESETS[$occasion]['guidance'];
+        return $brief;
+    }
+    if (preg_match('/^custom:(\d+)$/', $occasion, $match)) {
+        $styleId = (int) $match[1];
+        $label = user_style_label($pdo, $userId, $styleId);
+        // Deleted in another tab, or never theirs: the request is answered without an
+        // occasion rather than refused, which is what asking for nothing already does.
+        if ($label !== null) {
+            $brief['occasion'] = $label;
+            user_style_touch($pdo, $userId, $styleId);
+        }
+    }
+    return $brief;
+}
+
+/**
+ * The brief of a job that has already been queued, read back from its input_json.
+ *
+ * Two shapes reach this. A job queued since briefs exist has one under 'brief'. A job queued
+ * before has a shopping boolean and a budget at the top level, and it is still in the last ten
+ * rows the history shows, so it is read rather than shown as blank: shopping on was today's
+ * 'both'.
+ */
+function analysis_brief_stored(array $input): array {
+    $raw = is_array($input['brief'] ?? null) ? $input['brief'] : ['source' => !empty($input['shopping']) ? 'both' : 'wardrobe', 'budget' => $input['budget'] ?? ''];
+    $source = analysis_source($raw['source'] ?? '');
+    return [
+        'occasion' => is_scalar($raw['occasion'] ?? null) ? (string) $raw['occasion'] : '',
+        'guidance' => is_scalar($raw['guidance'] ?? null) ? (string) $raw['guidance'] : '',
+        'source' => $source,
+        'budget' => analysis_budget(['source' => $source, 'budget' => $raw['budget'] ?? '']),
+    ];
+}
+
+/**
+ * Why this brief cannot be answered with this wardrobe, or null when it can.
+ *
+ * Two prendas has always been the floor, and for a look built out of what somebody owns it
+ * still is -- one garment is not a combination. A look built by the shops does not need the
+ * wardrobe at all, so an account with nothing in it may ask for one; what it must bring
+ * instead is an occasion, because a stylist handed neither clothes nor a reason has been asked
+ * for nothing in particular and will answer accordingly.
+ *
+ * Called by the endpoint, so a refusal costs no row, and again by the worker, because the
+ * wardrobe can empty between queueing and picking the job up.
+ */
+function analysis_blocked(array $brief, int $garmentCount): ?string {
+    if (($brief['source'] ?? '') === 'shops') {
+        if (($brief['occasion'] ?? '') === '' && $garmentCount < 2) {
+            return 'Para un look entero de tienda, elige un estilo o añade al menos dos prendas: sin una cosa ni la otra no sé para qué vestirte.';
+        }
+        return null;
+    }
+    return $garmentCount < 2 ? 'Añade al menos dos prendas.' : null;
 }
 
 /**
  * Bump when the instructions or the schema change enough that an old answer is no longer
  * the answer we would give today, so fingerprints from before stop matching.
+ *
+ * 2: the brief. The instructions gained an occasion and a third way of choosing where the
+ * clothes come from, so every answer written before them was written to a different question.
  */
-const ANALYSIS_PROMPT_VERSION = 1;
+const ANALYSIS_PROMPT_VERSION = 2;
 
 /**
  * Everything that decides what the stylist replies, in one hash. The garments are the rows
@@ -70,8 +183,19 @@ function analysis_fingerprint(array $garments, array $input): string {
     ], JSON_UNESCAPED_UNICODE));
 }
 
-/** How many analyses an ordinary account may start per hour. */
-const ANALYSES_PER_HOUR = 2;
+/**
+ * How many analyses an ordinary account may start per hour.
+ *
+ * Two was the right number while every run asked the same question: a second one in the same
+ * hour was almost always the same analysis, and the fingerprint hands that back for free. With
+ * a brief it is not -- a look for a coffee and a look for a party are two questions, and
+ * somebody trying both plus one of their own styles has spent the hour on the third press
+ * without having repeated themselves once.
+ *
+ * It is still a ceiling and not a budget: OPENAI_MAX_JOBS_PER_DAY is what stops the key being
+ * drained, and this is what stops one account holding the worker.
+ */
+const ANALYSES_PER_HOUR = 5;
 
 /**
  * The analyses this account has spent in the last hour, newest first.

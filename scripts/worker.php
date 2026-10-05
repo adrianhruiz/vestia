@@ -3,6 +3,7 @@
 declare(strict_types=1);
 require dirname(__DIR__) . '/app/bootstrap.php';
 require APP_ROOT . '/app/OpenAI.php';
+require APP_ROOT . '/app/Styles.php';
 require APP_ROOT . '/app/Analysis.php';
 require APP_ROOT . '/app/StyleReading.php';
 
@@ -12,19 +13,20 @@ final class JobCancelled extends RuntimeException {}
 /** The analysis: read the wardrobe, ask the stylist. It does not draw anything. */
 function run_wardrobe_analysis(PDO $pdo, OpenAI $ai, array $job, callable $announce, callable $stopIfCancelled): array {
     $garments = analysis_garments($pdo, (int) $job['user_id']);
-    if (count($garments) < 2) throw new RuntimeException('Añade al menos dos prendas antes de analizar.');
     $input = json_decode($job['input_json'], true) ?: [];
     // Jobs queued before the shopping flag existed stored the profile flat and always searched.
     $preferences = is_array($input['preferences'] ?? null) ? $input['preferences'] : $input;
-    $withShopping = (bool) ($input['shopping'] ?? true);
-    // Jobs queued before the budget moved out of the profile simply have none.
-    $budget = (string) ($input['budget'] ?? '');
+    $brief = analysis_brief_stored($input);
+    // Asked again here and not only at the endpoint: the wardrobe can have emptied between
+    // queueing and picking the job up, and how many garments a brief needs depends on it.
+    $blocked = analysis_blocked($brief, count($garments));
+    if ($blocked !== null) throw new RuntimeException($blocked);
     // The wardrobe can have moved between queueing and picking the job up. Record what was
     // really sent, or a later identical request would reuse an answer about other clothes.
     $pdo->prepare('UPDATE jobs SET fingerprint=? WHERE id=?')->execute([analysis_fingerprint($garments, $input), $job['id']]);
     $stopIfCancelled();
-    $announce(count($garments) . ' prendas leídas · ' . ($withShopping ? 'buscando combinaciones y compras' : 'buscando combinaciones'), 30);
-    $result = $ai->analyze($garments, $preferences, $withShopping, $budget);
+    $announce(analysis_phase($brief, count($garments)), 30);
+    $result = $ai->analyze($garments, $preferences, $brief);
     $stopIfCancelled();
     return $result;
 }
@@ -50,6 +52,22 @@ function run_style_reading(PDO $pdo, OpenAI $ai, array $job, callable $announce,
     $answer = $ai->readStyle($outfits);
     $stopIfCancelled();
     return style_reading_result($answer);
+}
+
+/**
+ * What the progress bar says once the wardrobe has been read: the brief, in one line.
+ *
+ * The honest progress of a run that is one slow call is the name of the step it is on, and
+ * with three sources the step is no longer the same sentence every time. A look built by the
+ * shops has not "read 40 garments" in any meaningful sense, so it does not claim to.
+ */
+function analysis_phase(array $brief, int $garments): string {
+    $what = $brief['occasion'] === '' ? 'buscando combinaciones' : 'buscando looks para ' . mb_strtolower($brief['occasion']);
+    return match ($brief['source']) {
+        'shops' => $what . ' en las tiendas',
+        'both' => $garments . ' prendas leídas · ' . $what . ' y compras',
+        default => $garments . ' prendas leídas · ' . $what,
+    };
 }
 
 /** What the bar says before the job has done anything. Each type starts somewhere different. */

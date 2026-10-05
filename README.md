@@ -147,11 +147,60 @@ PRE y PROD conservan su flujo habitual.
 
 ```
 app/       bootstrap.php (env, sesión, PDO, migraciones) · OpenAI.php (análisis y lectura de estilo)
+           Styles.php (ocasiones predefinidas y propias) · Analysis.php (la petición y sus límites)
 database/  migrations/*.sql (esquema versionado, se aplica solo)
 public/    index.php (front controller) · share-image.php · assets/ · uploads/
 scripts/   worker.php (cola de jobs) · migrate.php · seed_*.php · import_official_catalog.php
 storage/   official_catalog.json · shares/ · logs/
 ```
+
+## La petición al estilista
+
+El estilista ya no se pide con un interruptor: se le dice **para qué**, **de dónde sale la
+ropa** y **cuánto** estás dispuesto a gastar. Las tres cosas juntas son la *petición*, y van
+en una hoja que se abre desde «Cambiar la petición», en la tarjeta del estilista o desde
+«Nueva petición» en Outfits IA. El botón «Pedir un look» repite sin preguntar la última
+petición que se lanzó.
+
+**Para qué.** Ocho ocasiones vienen con la aplicación —café, fiesta, deporte, oficina, cita,
+viaje, finde en casa y evento—, más «Mi día a día», que es lo que hacía la app antes de que
+hubiera ocasiones. Viven en `STYLE_PRESETS` (`app/Styles.php`): son código, se despliegan con
+el código y cada una lleva una frase que le explica al modelo qué significa, porque «Café» a
+secas es ambiguo y un modelo que no puede preguntar se lo inventa. El *slug* de cada una es lo
+que se almacena, así que no se puede cambiar una vez publicado; la etiqueta sí.
+
+**Tus propios estilos.** El `＋` al final de la fila guarda la ocasión que escribas —
+«biblioteca», «terraceo»— y te la deja marcada. Máximo 40 caracteres en una línea y doce por
+cuenta. «Biblioteca» y «biblioteca» son el mismo estilo, y escribir «cafe» no crea nada: te
+marca el preset que ya existe. Lo que se guarda de una petición es el **nombre** del estilo y
+nunca su fila, así que borrar un chip no reescribe los looks que pediste con él.
+
+**De dónde sale la ropa.** Tres respuestas, no un sí o un no:
+
+| Opción | Qué hace | Coste |
+|--------|----------|-------|
+| Solo mi armario | combina lo que ya tienes | sin búsqueda web |
+| Mi armario y tiendas | completa con lo que falte | búsqueda web |
+| Sorpréndeme con tiendas | el look lo montan las tiendas; tu armario es la referencia de tu estilo | búsqueda web, la más cara |
+
+«Sorpréndeme» admite un armario vacío —una cuenta nueva puede pedir que la vistan— pero exige
+una ocasión: sin ropa y sin motivo no hay ninguna petición que responder. Las otras dos siguen
+pidiendo dos prendas como mínimo. El presupuesto solo aparece, y solo viaja, cuando hay algo
+que comprar.
+
+La petición entra en la huella del análisis, así que cambiar de Café a Fiesta es una pregunta
+nueva y no devuelve la respuesta anterior; repetir la misma petición con el mismo armario sigue
+reutilizando lo ya pagado. El límite por cuenta son cinco análisis por hora —eran dos cuando
+todas las peticiones eran la misma, y con ocasiones distintas se agotaban sin haber repetido
+ninguna—, más el tope diario de `OPENAI_MAX_JOBS_PER_DAY`. La cuota se dice dentro de la hoja, antes de componer la
+petición. Outfits IA muestra para qué se pidió lo que está en pantalla y lista las peticiones
+anteriores; sus looks no se guardan para volver a abrirlos.
+
+El texto que escribe la persona viaja como **dato** dentro del `input` de la petición a OpenAI,
+nunca concatenado a las `instructions`. El presupuesto, que antes sí se concatenaba, también.
+
+Pruebas: `php tests/run.php Styles` y `php tests/run.php Analysis` (las dos necesitan
+`TEST_DB_DATABASE`).
 
 ## Escaneo de etiquetas (0.0.7)
 
