@@ -245,9 +245,17 @@ function render_share_page(string $token): never {
     if (!$share) share_error_page(404, 'Este look no existe', 'El enlace no es correcto, o el look nunca llegó a compartirse.');
     if ($share['revoked_at'] !== null) share_error_page(410, 'Este look ya no se comparte', 'Quien lo compartió ha retirado el enlace.');
     db()->prepare('UPDATE outfit_shares SET views=views+1 WHERE id=?')->execute([$share['id']]);
+    // Someone already signed in has nothing to register for: the page greets them with their
+    // own account and sends them back to their wardrobe instead of selling them Vestia.
+    $viewer = null;
+    if ($uid = user_id()) {
+        $stmt = db()->prepare('SELECT name,email FROM users WHERE id=?');
+        $stmt->execute([$uid]);
+        $viewer = $stmt->fetch() ?: null;
+    }
     // Whoever registers from here arrived through this look. /api/register writes it down,
     // which is the only way to know afterwards whether sharing brings anyone in.
-    $_SESSION['ref_share'] = $token;
+    if ($viewer === null) $_SESSION['ref_share'] = $token;
 
     // Defaults rather than ?? at every use: the template reads these a dozen times, and a
     // row written by an older version of share_snapshot() must still render.
@@ -287,7 +295,7 @@ function render_share_page(string $token): never {
 <link rel="stylesheet" href="<?= asset('/assets/app.css') ?>"></head>
 <body data-auth="0">
 <?php // No version number here: it means something to us and nothing to a stranger. ?>
-<header class="topbar"><a class="brand" href="/"><span>V</span>Vestia</a><div><button class="btn btn-ghost" data-open-auth="login">Entrar</button><button class="btn btn-dark" data-open-auth="register">Crear mi armario</button></div></header>
+<header class="topbar"><a class="brand" href="/"><span>V</span>Vestia</a><div><?php if ($viewer): ?><a class="btn btn-dark" href="/">Mi armario</a><div class="account"><button class="avatar" id="account-toggle" title="Tu cuenta" aria-haspopup="true" aria-expanded="false" aria-controls="account-menu"><?= e(mb_strtoupper(mb_substr((string) $viewer['name'], 0, 1))) ?></button><div class="account-menu" id="account-menu" role="menu" hidden><div class="account-id"><b><?= e($viewer['name']) ?></b><span><?= e($viewer['email']) ?></span></div><a class="account-item" role="menuitem" href="/">Mi armario</a><button class="account-item danger" role="menuitem" id="logout">Cerrar sesión</button></div></div><?php else: ?><button class="btn btn-ghost" data-open-auth="login">Entrar</button><button class="btn btn-dark" data-open-auth="register">Crear mi armario</button><?php endif ?></div></header>
 <main class="share">
  <section class="share-look<?= $flatlay || $hasPicture ? '' : ' is-text' ?>">
   <?php if ($flatlay): ?>
@@ -300,7 +308,7 @@ function render_share_page(string $token): never {
    <h1><?= e($look['name']) ?></h1>
    <p class="share-owner"><?php if ($owner !== ''): ?><i aria-hidden="true"><?= e(mb_strtoupper(mb_substr($owner, 0, 1))) ?></i><span>Un look de <b><?= e($owner) ?></b>, hecho con su armario real</span><?php else: ?><span>Un look hecho con Vestia a partir de un armario real</span><?php endif ?></p>
    <?php if ($reason !== ''): ?><p class="share-reason"><?= e($reason) ?></p><?php endif ?>
-   <div class="share-act"><div><button class="btn btn-coral" data-open-auth="register">Crear mi armario <b>→</b></button><small>Gratis, sin tarjeta</small></div><button class="share-copy" type="button" data-copy-link="<?= e(share_url($token)) ?>">Copiar enlace del look</button></div>
+   <div class="share-act"><?php if ($viewer): ?><a class="btn btn-coral" href="/">Ir a mi armario <b>→</b></a><?php else: ?><div><button class="btn btn-coral" data-open-auth="register">Crear mi armario <b>→</b></button><small>Gratis, sin tarjeta</small></div><?php endif ?><button class="share-copy" type="button" data-copy-link="<?= e(share_url($token)) ?>">Copiar enlace del look</button></div>
   </div>
  </section>
  <?php if ($pieces): ?>
@@ -318,10 +326,14 @@ function render_share_page(string $token): never {
  </ul></section>
  <?php endif ?>
  <section><div class="share-head"><h2>Cómo se hizo este look</h2></div><ol class="share-how"><li><span class="step">01</span><h3>Fotografía o escanea</h3><p>Añade la foto y la referencia de la etiqueta de cada prenda.</p></li><li><span class="step">02</span><h3>Define tu estilo</h3><p>Dinos qué te gusta, qué evitas y para qué ocasiones vistes.</p></li><li><span class="step">03</span><h3>Descubre tus looks</h3><p>La IA combina la ropa que ya tienes y te dice qué falta.</p></li></ol></section>
+ <?php if ($viewer): ?>
+ <section class="share-cta"><div><h2>¿Y con tu armario?</h2><p>Pide a Vestia nuevas combinaciones con las prendas que ya tienes.</p></div><div class="share-go"><a class="btn btn-coral" href="/">Ir a mi armario</a></div></section>
+ <?php else: ?>
  <section class="share-cta"><div><h2>Tu armario también tiene algo que decir</h2><p>Digitaliza tus prendas y deja que Vestia te proponga combinaciones con lo que ya tienes.</p></div><div class="share-go"><button class="btn btn-coral" data-open-auth="register">Crear mi armario</button><small>Gratis, sin tarjeta</small></div></section>
+ <?php endif ?>
 </main>
 <footer class="share-foot"><a class="brand" href="/"><span>V</span>Vestia</a><span><?= $owner !== '' ? 'Look compartido por ' . e($owner) . ' · ' : '' ?>Las prendas enlazan a la tienda oficial</span></footer>
-<div class="modal" id="auth-modal" hidden><div class="modal-card auth-card"><button class="close" data-close>×</button><span class="eyebrow">BIENVENIDO A VESTIA</span><h2 id="auth-title">Entrar</h2><form id="auth-form"><label class="register-only">Nombre<input name="name" autocomplete="name"></label><label>Email<input type="email" name="email" required autocomplete="email"></label><label>Contraseña<input type="password" name="password" required minlength="10" autocomplete="current-password"></label><button class="btn btn-coral full">Continuar</button><p class="form-error"></p></form><button class="text-btn" id="auth-switch">¿No tienes cuenta? Crear armario</button></div></div>
+<?php if (!$viewer): ?><div class="modal" id="auth-modal" hidden><div class="modal-card auth-card"><button class="close" data-close>×</button><span class="eyebrow">BIENVENIDO A VESTIA</span><h2 id="auth-title">Entrar</h2><form id="auth-form"><label class="register-only">Nombre<input name="name" autocomplete="name"></label><label>Email<input type="email" name="email" required autocomplete="email"></label><label>Contraseña<input type="password" name="password" required minlength="10" autocomplete="current-password"></label><button class="btn btn-coral full">Continuar</button><p class="form-error"></p></form><button class="text-btn" id="auth-switch">¿No tienes cuenta? Crear armario</button></div></div><?php endif ?>
 <div id="toast" role="status"></div>
 <?php // Registering here lands on an empty wardrobe, which is the worst possible answer to
       // someone who just decided they want this: the app opens on "add your first garment". ?>
