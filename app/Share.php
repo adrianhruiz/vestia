@@ -359,12 +359,6 @@ function render_share_page(string $token): never {
   <?php endforeach ?>
  </ul></section>
  <?php endif ?>
- <section><div class="share-head"><h2>Cómo se hizo este look</h2></div><ol class="share-how"><li><span class="step">01</span><h3>Fotografía o escanea</h3><p>Añade la foto y la referencia de la etiqueta de cada prenda.</p></li><li><span class="step">02</span><h3>Define tu estilo</h3><p>Dinos qué te gusta, qué evitas y para qué ocasiones vistes.</p></li><li><span class="step">03</span><h3>Descubre tus looks</h3><p>La IA combina la ropa que ya tienes y te dice qué falta.</p></li></ol></section>
- <?php if ($viewer): ?>
- <section class="share-cta"><div><h2>¿Y con tu armario?</h2><p>Pide a Vestia nuevas combinaciones con las prendas que ya tienes.</p></div><div class="share-go"><a class="btn btn-coral" href="/">Ir a mi armario</a></div></section>
- <?php else: ?>
- <section class="share-cta"><div><h2>Tu armario también tiene algo que decir</h2><p>Digitaliza tus prendas y deja que Vestia te proponga combinaciones con lo que ya tienes.</p></div><div class="share-go"><button class="btn btn-coral" data-open-auth="register">Crear mi armario</button><small>Gratis, sin tarjeta</small></div></section>
- <?php endif ?>
 </main>
 <footer class="share-foot"><a class="brand" href="/"><span>V</span>Vestia</a><span><?= $owner !== '' ? 'Look compartido por ' . e($owner) . ' · ' : '' ?>Las prendas enlazan a la tienda oficial</span></footer>
 <?php if (!$viewer): ?><div class="modal" id="auth-modal" hidden><div class="modal-card auth-card"><button class="close" data-close>×</button><span class="eyebrow">BIENVENIDO A VESTIA</span><h2 id="auth-title">Entrar</h2><form id="auth-form"><label class="register-only">Nombre<input name="name" autocomplete="name"></label><label>Email<input type="email" name="email" required autocomplete="email"></label><label>Contraseña<input type="password" name="password" required minlength="10" autocomplete="current-password"></label><button class="btn btn-coral full">Continuar</button><p class="form-error"></p></form><button class="text-btn" id="auth-switch">¿No tienes cuenta? Crear armario</button></div></div><?php endif ?>
