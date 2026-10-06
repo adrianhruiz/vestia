@@ -83,7 +83,7 @@
 /* Links dressed as buttons, such as the way back to the wardrobe for a reader already signed in. */
 .share a.btn,.topbar a.btn{display:inline-flex;align-items:center;text-decoration:none}a.account-item{text-decoration:none}
 .share-act .btn-coral{padding:15px 22px;font-size:14px}
-.share-act small,.share-go small{display:block;font-size:12px;color:var(--muted);margin-top:6px}
+.share-act small{display:block;font-size:12px;color:var(--muted);margin-top:6px}
 .share-copy{background:none;border:0;padding:12px 0;font:600 13px 'DM Sans',sans-serif;color:var(--ink);text-decoration:underline;text-underline-offset:4px;cursor:pointer}
 
 /* Section heads carry the count, the one fact the eye wants before scanning a row. */
@@ -116,16 +116,6 @@ a.share-piece:focus-visible{outline:2px solid var(--ink);outline-offset:3px}
 .share-buy b{font:600 22px 'Playfair Display',serif;font-variant-numeric:tabular-nums}
 .share-buy .btn{min-height:44px;display:inline-flex;align-items:center;text-decoration:none}
 
-.share-how{display:grid;grid-template-columns:repeat(3,1fr);gap:clamp(24px,4vw,48px);list-style:none;margin:0;padding:0}
-.share-how li{border-top:1px solid var(--line);padding-top:20px}
-.share-how h3{font:600 23px 'Playfair Display',serif;margin:12px 0 8px}
-.share-how p{color:var(--muted);line-height:1.6;margin:0;font-size:14px}
-
-.share-cta{background:var(--ink);color:#fff;padding:clamp(36px,6vw,64px) clamp(20px,5vw,56px);display:grid;grid-template-columns:minmax(0,1fr) auto;gap:28px;align-items:center}
-.share-cta h2{font:600 clamp(28px,3.4vw,38px)/1.1 'Playfair Display',serif;margin:0 0 10px;text-wrap:balance}
-.share-cta p{color:#c7d8d1;margin:0;line-height:1.6;max-width:46ch}
-.share-go{display:grid;justify-items:center}
-.share-go small{color:#9fb7ae}
 .share-foot{max-width:1080px;margin:0 auto;padding:28px clamp(16px,4vw,32px) 40px;display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px;font-size:12px;color:var(--muted)}
 .share-foot .brand{font-size:18px}
 .share-foot .brand span{width:24px;height:24px;font-size:14px}
@@ -136,14 +126,7 @@ a.share-piece:focus-visible{outline:2px solid var(--ink);outline-offset:3px}
  .share-flatlay{aspect-ratio:auto!important;height:min(54vh,460px);max-height:none}
  .share-pieces{display:flex;overflow-x:auto;scroll-snap-type:x mandatory;padding:0 clamp(16px,4vw,32px) 8px;margin:0 calc(-1 * clamp(16px,4vw,32px));scroll-padding-inline:clamp(16px,4vw,32px)}
  /* Narrow enough that the next card shows at the edge: the row has to look swipeable. */
- .share-pieces li{flex:0 0 min(40vw,200px);scroll-snap-align:start}
- /* Stacked, the steps are a list to skim, not three posters: the number sits beside its step. */
- .share-how{grid-template-columns:1fr;gap:18px}
- .share-how li{display:grid;grid-template-columns:30px minmax(0,1fr);padding-top:16px}
- .share-how .step{grid-row:1/3;padding-top:4px}
- .share-how h3{font-size:19px;margin:0 0 4px}
- .share-cta{grid-template-columns:1fr}
- .share-go{justify-items:start}}
+ .share-pieces li{flex:0 0 min(40vw,200px);scroll-snap-align:start}}
 @media(max-width:560px){
  .share-head{display:grid}
  .share-missing li{grid-template-columns:1fr}
